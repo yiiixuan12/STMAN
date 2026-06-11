@@ -13,6 +13,7 @@ This is the code repository for **Urban Wide-Area Traffic Flow Forecasting: A Sp
 - `baselines/`: source-only baseline implementations and a clean baseline launcher.
 - `scripts/`: reusable analysis and STMAN launch scripts.
 - `Datasets/`: processed public traffic arrays and graph files used by the training scripts.
+- `FractalFeatures/`: node-level spatial and temporal fractal feature arrays.
 - `datasets/README.md`: dataset layout and file description.
 - `requirements.txt`: Python dependencies.
 

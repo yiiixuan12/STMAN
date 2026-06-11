@@ -7,6 +7,7 @@ __pycache__/
 .ipynb_checkpoints/
 
 Datasets/
+FractalFeatures/
 datasets/raw/
 datasets/processed/
 data/
@@ -45,8 +46,8 @@ wandb/
 !Datasets/**/*.csv
 !Datasets/**/*.pkl
 !Datasets/**/*.txt
-!spatial_fractal_vectors_*.npy
-!train_timefractals_*.npy
+!FractalFeatures/
+!FractalFeatures/*.npy
 !scripts/run_stman_all.sh
 !baselines/run_baseline.sh
 

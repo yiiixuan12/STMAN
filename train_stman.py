@@ -17,6 +17,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from utils import append_calendar_features, load_adjacency_csv, create_data_loaders
 from train import train_model
 
+FRACTAL_FEATURE_DIR = "FractalFeatures"
+
 
 def infer_resume_architecture(resume_ckpt: str):
     """Infer warm-start-critical architecture choices from a checkpoint."""
@@ -358,8 +360,9 @@ def main():
     N = A.shape[0]
 
     # 分形特征
-    SF_np = np.load(f"spatial_fractal_vectors_{ds}.npy")
-    TF_np = np.load(f"train_timefractals_{ds}.npy")
+    fractal_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), FRACTAL_FEATURE_DIR)
+    SF_np = np.load(os.path.join(fractal_dir, f"spatial_fractal_vectors_{ds}.npy"))
+    TF_np = np.load(os.path.join(fractal_dir, f"train_timefractals_{ds}.npy"))
     if node_indices is not None and SF_np.shape[0] != len(node_indices):
         SF_np = SF_np[node_indices]
     if node_indices is not None and TF_np.shape[0] != len(node_indices):

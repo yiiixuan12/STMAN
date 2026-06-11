@@ -1,7 +1,6 @@
 Datasets/**/*.npz filter=lfs diff=lfs merge=lfs -text
 Datasets/**/*.pkl filter=lfs diff=lfs merge=lfs -text
-spatial_fractal_vectors_*.npy filter=lfs diff=lfs merge=lfs -text
-train_timefractals_*.npy filter=lfs diff=lfs merge=lfs -text
 Datasets/METR-LA/METR-LA_edges.csv filter=lfs diff=lfs merge=lfs -text
 Datasets/PEMS07/adj_matrix.csv filter=lfs diff=lfs merge=lfs -text
 Datasets/PEMS03/adj_matrix.csv filter=lfs diff=lfs merge=lfs -text
+FractalFeatures/*.npy filter=lfs diff=lfs merge=lfs -text
