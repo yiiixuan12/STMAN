@@ -23,6 +23,11 @@ warnings.filterwarnings('ignore')
 ROOT = Path(__file__).resolve().parent
 
 
+def default_train_ratio(dataset: str) -> float:
+    key = str(dataset).upper().replace("-", "").replace("_", "")
+    return 0.7 if key in {"METRLA", "PEMSBAY"} else 0.6
+
+
 def _r2_score(y_true, y_pred):
     """Small local replacement for sklearn.metrics.r2_score."""
     y_true = np.asarray(y_true, dtype=np.float64)
@@ -262,10 +267,11 @@ if __name__ == "__main__":
         X = load_traffic_data(ds)
         T = X.shape[0]
         N = X.shape[1]
-        n_train = int(T * 0.6)
+        train_ratio = default_train_ratio(ds)
+        n_train = int(T * train_ratio)
         X_train = X[:n_train]
 
-        print(f"  X shape: {X.shape}, train: {X_train.shape}, N_nodes: {N}")
+        print(f"  X shape: {X.shape}, train: {X_train.shape} ({train_ratio:.1f}), N_nodes: {N}")
         print(f"  Computing temporal MF-DFA R^2 (q=2) for {N} nodes...")
 
         temporal_r2 = np.empty(N)

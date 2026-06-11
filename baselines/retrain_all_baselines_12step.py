@@ -3,7 +3,7 @@
 """
 用标准超参数重训所有旧 baseline 的 12步预测。
 确保结果可复现，与 Table III 对应。
-统一评估协议：minmax scaler, 6:2:2 split, unmasked MAE。
+统一评估协议：minmax scaler, benchmark split, unmasked MAE。
 """
 import os, sys, argparse, json
 import numpy as np
@@ -96,8 +96,14 @@ DATASET_INFO = {
 }
 
 
+def default_split_ratios(dataset_name):
+    if dataset_name in {"METR-LA", "PEMS-BAY"}:
+        return 0.7, 0.1
+    return 0.6, 0.2
+
+
 def load_data(dataset_name, project_dir):
-    """Load data with minmax scaler, 6:2:2 split"""
+    """Load data with minmax scaler and dataset-specific benchmark split."""
     sys.path.insert(0, project_dir)
     from utils import load_adjacency_csv, create_data_loaders
 
@@ -111,10 +117,13 @@ def load_data(dataset_name, project_dir):
     )
 
     # Load traffic data
+    npz_path = os.path.join(data_dir, f"{dataset_name}.npz")
     csv_path = os.path.join(data_dir, info["csv"]) if info["csv"] else None
     h5_path = os.path.join(data_dir, info["h5"]) if info["h5"] else None
 
-    if csv_path and os.path.exists(csv_path):
+    if os.path.exists(npz_path):
+        raw = np.load(npz_path)["data"].astype(np.float32)
+    elif csv_path and os.path.exists(csv_path):
         raw = pd.read_csv(csv_path).values.astype(np.float32)
     elif h5_path and os.path.exists(h5_path):
         raw = pd.read_hdf(h5_path).values.astype(np.float32)
@@ -125,8 +134,13 @@ def load_data(dataset_name, project_dir):
         raw = raw[:, :, np.newaxis]
 
     T = raw.shape[0]
-    n_train = int(T * 0.6)
-    n_val = int(T * 0.2)
+    train_ratio, val_ratio = default_split_ratios(dataset_name)
+    n_train = int(T * train_ratio)
+    n_val = int(T * val_ratio)
+    print(
+        f"Split: train={train_ratio:.1f}, val={val_ratio:.1f}, "
+        f"test={1.0 - train_ratio - val_ratio:.1f}"
+    )
 
     train_loader, val_loader, test_loader, scaler = create_data_loaders(
         raw[:n_train], raw[n_train:n_train + n_val], raw[n_train + n_val:],

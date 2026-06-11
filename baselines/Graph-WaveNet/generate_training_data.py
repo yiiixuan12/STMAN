@@ -49,6 +49,13 @@ def generate_graph_seq2seq_io_data(
     return x, y
 
 
+def default_split_from_path(*paths):
+    key = " ".join(str(path) for path in paths).upper().replace("-", "").replace("_", "")
+    if "METRLA" in key or "PEMSBAY" in key:
+        return 0.7, 0.1, 0.2
+    return 0.6, 0.2, 0.2
+
+
 def generate_train_val_test(args):
     seq_length_x, seq_length_y = args.seq_length_x, args.seq_length_y
     df = pd.read_hdf(args.traffic_df_filename)
@@ -69,14 +76,24 @@ def generate_train_val_test(args):
     print("x shape: ", x.shape, ", y shape: ", y.shape)
     # Write the data into npz file.
     num_samples = x.shape[0]
-    split_total = args.train_ratio + args.val_ratio + args.test_ratio
+    default_train, default_val, default_test = default_split_from_path(
+        args.output_dir, args.traffic_df_filename
+    )
+    train_ratio = default_train if args.train_ratio is None else args.train_ratio
+    val_ratio = default_val if args.val_ratio is None else args.val_ratio
+    test_ratio = default_test if args.test_ratio is None else args.test_ratio
+    split_total = train_ratio + val_ratio + test_ratio
     if abs(split_total - 1.0) > 1e-6:
         raise ValueError(
             "train_ratio + val_ratio + test_ratio must equal 1.0, "
             f"got {split_total:.6f}"
         )
-    num_test = round(num_samples * args.test_ratio)
-    num_train = round(num_samples * args.train_ratio)
+    print(
+        "split ratios: "
+        f"train={train_ratio:.3f}, val={val_ratio:.3f}, test={test_ratio:.3f}"
+    )
+    num_test = round(num_samples * test_ratio)
+    num_train = round(num_samples * train_ratio)
     num_val = num_samples - num_test - num_train
     x_train, y_train = x[:num_train], y[:num_train]
     x_val, y_val = (
@@ -105,9 +122,9 @@ if __name__ == "__main__":
     parser.add_argument("--seq_length_y", type=int, default=12, help="Sequence Length.",)
     parser.add_argument("--y_start", type=int, default=1, help="Y pred start", )
     parser.add_argument("--dow", action='store_true',)
-    parser.add_argument("--train_ratio", type=float, default=0.7)
-    parser.add_argument("--val_ratio", type=float, default=0.1)
-    parser.add_argument("--test_ratio", type=float, default=0.2)
+    parser.add_argument("--train_ratio", type=float, default=None)
+    parser.add_argument("--val_ratio", type=float, default=None)
+    parser.add_argument("--test_ratio", type=float, default=None)
     parser.add_argument("--overwrite", action="store_true")
 
     args = parser.parse_args()

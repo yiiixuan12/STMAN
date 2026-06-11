@@ -9,6 +9,8 @@ This repository includes the processed files needed to reproduce the experiments
 
 Large raw files such as `.h5`, generated train/validation/test splits, checkpoints, prediction dumps, logs, and figures are intentionally excluded.
 
+Default chronological splits follow the benchmark convention: `PEMS03`/`PEMS07`/`PEMS08` use `6:2:2`, and `PEMS-BAY`/`METR-LA` use `7:1:2`.
+
 Included dataset names:
 
 - `PEMS03`

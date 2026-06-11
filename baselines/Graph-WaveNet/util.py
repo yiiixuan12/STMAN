@@ -256,6 +256,13 @@ def _load_raw_stream_source(source_path):
     return np.concatenate([target, tod], axis=-1).astype(np.float32)
 
 
+def _default_stream_split(source_path):
+    key = os.path.basename(str(source_path)).upper().replace("-", "").replace("_", "")
+    if "METRLA" in key or "PEMSBAY" in key:
+        return 0.7, 0.1, 0.2
+    return 0.6, 0.2, 0.2
+
+
 def load_dataset_streaming(
     source_path,
     seq_length_x,
@@ -263,12 +270,16 @@ def load_dataset_streaming(
     batch_size,
     valid_batch_size=None,
     test_batch_size=None,
-    train_ratio=0.6,
-    val_ratio=0.2,
-    test_ratio=0.2,
+    train_ratio=None,
+    val_ratio=None,
+    test_ratio=None,
     y_start=1,
 ):
     full = _load_raw_stream_source(source_path)
+    default_train, default_val, default_test = _default_stream_split(source_path)
+    train_ratio = default_train if train_ratio is None else train_ratio
+    val_ratio = default_val if val_ratio is None else val_ratio
+    test_ratio = default_test if test_ratio is None else test_ratio
     x_offsets = np.sort(np.arange(-(int(seq_length_x) - 1), 1, 1))
     y_offsets = np.sort(np.arange(int(y_start), int(horizon) + 1, 1))
     min_t = abs(min(x_offsets))
