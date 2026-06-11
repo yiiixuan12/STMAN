@@ -169,9 +169,21 @@ def load_adjacency(dataset_dir: Path) -> np.ndarray:
     return pd.read_csv(path, header=None).values.astype(np.float32)
 
 
-def extract_dataset_features(data_root: Path, dataset: str, output_dir: Path, train_ratio: float = 0.6) -> tuple[Path, Path]:
+def default_train_ratio(dataset: str) -> float:
+    key = str(dataset).upper().replace("-", "").replace("_", "")
+    return 0.7 if key in {"METRLA", "PEMSBAY"} else 0.6
+
+
+def extract_dataset_features(
+    data_root: Path,
+    dataset: str,
+    output_dir: Path,
+    train_ratio: float | None = None,
+) -> tuple[Path, Path]:
     dataset_dir = data_root / dataset
     traffic = load_traffic_array(dataset_dir, dataset)
+    if train_ratio is None:
+        train_ratio = default_train_ratio(dataset)
     train_len = int(traffic.shape[0] * train_ratio)
     traffic_train = traffic[:train_len, :, 0]
 
@@ -191,7 +203,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data_root", type=Path, default=Path("Datasets"))
     parser.add_argument("--dataset", required=True)
     parser.add_argument("--output_dir", type=Path, default=Path("."))
-    parser.add_argument("--train_ratio", type=float, default=0.6)
+    parser.add_argument("--train_ratio", type=float, default=None)
     return parser.parse_args()
 
 

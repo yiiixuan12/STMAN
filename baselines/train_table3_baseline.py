@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Retrain LSTNN/PDFormer Table III cells with reproducible 6:2:2 testing.
+"""Retrain LSTNN/PDFormer Table III cells with reproducible benchmark splits.
 
 This runner is intentionally separate from the legacy Excel/table exporters.
 Each cell trains from the local dataset files, evaluates the returned best
@@ -43,8 +43,10 @@ class JobSpec:
 
 def package_root_from_code_root(root: Path) -> Path:
     root = root.resolve()
+    if (root / "train_stman.py").exists() and (root / "Datasets").exists():
+        return root
     if root.name != "multifract":
-        raise ValueError(f"Expected code root ending in multifract, got {root}")
+        return root
     return root.parents[1]
 
 
@@ -78,6 +80,13 @@ def normalize_dataset(dataset: str) -> str:
     if key not in lookup:
         raise ValueError(f"Unknown dataset={dataset}; choices={DATASETS}")
     return lookup[key]
+
+
+def default_split_ratios(dataset: str) -> tuple[float, float]:
+    dataset = normalize_dataset(dataset)
+    if dataset in {"METR-LA", "PEMS-BAY"}:
+        return 0.7, 0.1
+    return 0.6, 0.2
 
 
 def default_batch_size(model: str, dataset: str, horizon: int) -> int:
@@ -250,8 +259,8 @@ def load_data(
     seq_len: int,
     batch_size: int,
     model: str,
-    train_ratio: float = 0.6,
-    val_ratio: float = 0.2,
+    train_ratio: float | None = None,
+    val_ratio: float | None = None,
     node_indices_csv: Path | None = None,
     adj_path: Path | None = None,
 ):
@@ -260,6 +269,9 @@ def load_data(
     from utils import TrafficDataset, load_adjacency_csv
 
     raw = load_raw_series(root, dataset)
+    default_train_ratio, default_val_ratio = default_split_ratios(dataset)
+    train_ratio = default_train_ratio if train_ratio is None else float(train_ratio)
+    val_ratio = default_val_ratio if val_ratio is None else float(val_ratio)
     node_indices = load_node_indices(node_indices_csv)
     if node_indices is not None and raw.shape[1] != len(node_indices):
         raw = raw[:, node_indices, :]
@@ -527,8 +539,8 @@ def run_single(args: argparse.Namespace) -> int:
         seq_len,
         batch_size,
         model,
-        train_ratio=float(args.train_ratio),
-        val_ratio=float(args.val_ratio),
+        train_ratio=args.train_ratio,
+        val_ratio=args.val_ratio,
         node_indices_csv=args.node_indices_csv,
         adj_path=args.adj_path,
     )
@@ -738,8 +750,8 @@ def main() -> int:
     parser.add_argument("--batch_size", type=int, default=0)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", type=str, default="cuda:0")
-    parser.add_argument("--train_ratio", type=float, default=0.6)
-    parser.add_argument("--val_ratio", type=float, default=0.2)
+    parser.add_argument("--train_ratio", type=float, default=None)
+    parser.add_argument("--val_ratio", type=float, default=None)
     parser.add_argument("--run_dir", type=Path)
     parser.add_argument("--node_indices_csv", type=Path)
     parser.add_argument("--adj_path", type=Path)

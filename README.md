@@ -18,6 +18,10 @@ This is the code repository for **Urban Wide-Area Traffic Flow Forecasting: A Sp
 
 Processed traffic arrays, adjacency matrices, and node-level fractal features are included for reproducibility. Checkpoints, logs, generated predictions, generated figures, raw `.h5` files, and local manuscript artifacts are not included.
 
+## Data Split Convention
+
+Following common benchmark practice, `PEMS03`, `PEMS07`, and `PEMS08` use a `6:2:2` train/validation/test split by default, while `PEMS-BAY` and `METR-LA` use a `7:1:2` split by default. The training scripts apply this dataset-specific policy automatically unless split ratios are explicitly provided from the command line.
+
 ## Quick Start
 
 Install Git LFS and pull the processed data files:

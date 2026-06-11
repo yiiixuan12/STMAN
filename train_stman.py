@@ -163,6 +163,14 @@ def apply_resume_guard(args):
     args.finetune_lr = None
 
 
+def dataset_default_split(dataset: str) -> tuple[float, float]:
+    """Return train/validation split ratios following common traffic benchmarks."""
+    key = re.sub(r"[^A-Z0-9]", "", str(dataset).upper())
+    if key in {"METRLA", "PEMSBAY"}:
+        return 0.7, 0.1
+    return 0.6, 0.2
+
+
 def split_raw_data(raw: np.ndarray, split_rate: float = 0.6, val_ratio: float = 0.2):
     """Split raw series by explicit train and validation ratios."""
     split_rate = float(split_rate)
@@ -209,8 +217,10 @@ def main():
     parser.add_argument("--epochs", type=int, default=200)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--patience", type=int, default=30)
-    parser.add_argument("--split_rate", type=float, default=0.6)
-    parser.add_argument("--val_ratio", type=float, default=0.2)
+    parser.add_argument("--split_rate", type=float, default=None,
+                        help="training split ratio; default is dataset-specific")
+    parser.add_argument("--val_ratio", type=float, default=None,
+                        help="validation split ratio; default is dataset-specific")
     parser.add_argument("--scaler", type=str, default="standard")
     parser.add_argument("--tag", type=str, default="v2")
     parser.add_argument("--progress_log", type=str, default=None,
@@ -317,6 +327,12 @@ def main():
     parser.add_argument("--checkpoint_dir", type=str, default="checkpoints",
                         help="checkpoint输出目录；默认保持旧行为写入 ./checkpoints")
     args = parser.parse_args()
+
+    default_train_ratio, default_val_ratio = dataset_default_split(args.dataset)
+    if args.split_rate is None:
+        args.split_rate = default_train_ratio
+    if args.val_ratio is None:
+        args.val_ratio = default_val_ratio
 
     torch.manual_seed(42)
     np.random.seed(42)

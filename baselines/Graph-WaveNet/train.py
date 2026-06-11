@@ -38,11 +38,18 @@ parser.add_argument('--eval_checkpoint',type=str,default='',help='load a checkpo
 parser.add_argument('--eval_val_loss',type=str,default='',help='optional validation loss to print with eval-only results')
 parser.add_argument('--stream_source',type=str,default='',help='raw npz/h5/csv source; build Graph WaveNet windows on the fly')
 parser.add_argument('--stream_seq_length_x',type=int,default=12,help='history length for on-the-fly streaming windows')
-parser.add_argument('--stream_train_ratio',type=float,default=0.6,help='streaming train split ratio')
-parser.add_argument('--stream_val_ratio',type=float,default=0.2,help='streaming validation split ratio')
-parser.add_argument('--stream_test_ratio',type=float,default=0.2,help='streaming test split ratio')
+parser.add_argument('--stream_train_ratio',type=float,default=None,help='streaming train split ratio; default is dataset-specific')
+parser.add_argument('--stream_val_ratio',type=float,default=None,help='streaming validation split ratio; default is dataset-specific')
+parser.add_argument('--stream_test_ratio',type=float,default=None,help='streaming test split ratio; default is dataset-specific')
 
 args = parser.parse_args()
+
+
+def default_stream_split(source_path):
+    key = os.path.basename(str(source_path)).upper().replace("-", "").replace("_", "")
+    if "METRLA" in key or "PEMSBAY" in key:
+        return 0.7, 0.1, 0.2
+    return 0.6, 0.2, 0.2
 
 
 def stream_graphwavenet_test_metrics(engine, dataloader, scaler, device, horizon_count):
@@ -104,6 +111,15 @@ def main():
     device = torch.device(args.device)
     sensor_ids, sensor_id_to_ind, adj_mx = util.load_adj(args.adjdata,args.adjtype)
     if args.stream_source:
+        default_train, default_val, default_test = default_stream_split(args.stream_source)
+        train_ratio = default_train if args.stream_train_ratio is None else args.stream_train_ratio
+        val_ratio = default_val if args.stream_val_ratio is None else args.stream_val_ratio
+        test_ratio = default_test if args.stream_test_ratio is None else args.stream_test_ratio
+        print(
+            "streaming split ratios: "
+            f"train={train_ratio:.3f}, val={val_ratio:.3f}, test={test_ratio:.3f}",
+            flush=True,
+        )
         print("using streaming raw-series windows...", args.stream_source, flush=True)
         dataloader = util.load_dataset_streaming(
             args.stream_source,
@@ -112,9 +128,9 @@ def main():
             batch_size=args.batch_size,
             valid_batch_size=args.batch_size,
             test_batch_size=args.batch_size,
-            train_ratio=args.stream_train_ratio,
-            val_ratio=args.stream_val_ratio,
-            test_ratio=args.stream_test_ratio,
+            train_ratio=train_ratio,
+            val_ratio=val_ratio,
+            test_ratio=test_ratio,
         )
     elif args.eval_checkpoint:
         dataloader = util.load_dataset_eval_only(args.data, args.batch_size)
