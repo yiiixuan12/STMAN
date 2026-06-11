@@ -1,6 +1,6 @@
 # STMAN
 
-This is the code repository for STMAN.
+This is the code repository for **Urban Wide-Area Traffic Flow Forecasting: A Spatiotemporal Multifractal Attention-Based Approach**.
 
 ## Repository Contents
 
