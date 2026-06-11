@@ -775,9 +775,9 @@ def train_model(
     gpu_ids: Optional[list] = None,         # e.g. [0,1] 表示用两张卡DataParallel
     scaler_type: Optional[str] = None,      # 保存到 checkpoint，供严格评估重建
     scale_target_only: bool = False,        # calendar channels stay raw while target channel is scaled
-    calendar_features: str = "tod",         # saved audit metadata: tod or tod+dow
-    split_rate: Optional[float] = None,     # 保存训练协议，供复现和评估审计
-    val_ratio: Optional[float] = None,      # 保存训练协议，供复现和评估审计
+    calendar_features: str = "tod",         # saved reproducibility metadata: tod or tod+dow
+    split_rate: Optional[float] = None,     # 保存训练协议，供复现和评估使用
+    val_ratio: Optional[float] = None,      # 保存训练协议，供复现和评估使用
 ):
     device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if out_dim is None:

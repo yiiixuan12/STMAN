@@ -1,14 +1,15 @@
 # Dataset Organization
 
-The public datasets are not committed to this repository because of their size and redistribution constraints.
+This repository includes the lightweight processed files needed to reproduce the experiments:
 
-Place local data under one of the ignored directories below before running experiments:
+- traffic time-series arrays: `Datasets/<dataset>/<dataset>.npz`
+- adjacency matrices: `Datasets/<dataset>/adj_matrix.csv`
+- optional edge lists, node maps, and sensor metadata where available
+- node-level fractal features: `spatial_fractal_vectors_<dataset>.npy` and `train_timefractals_<dataset>.npy`
 
-- `datasets/raw/`
-- `datasets/processed/`
-- `data/`
+Large raw files such as `.h5`, generated train/validation/test splits, checkpoints, prediction dumps, logs, and figures are intentionally excluded.
 
-Expected dataset names:
+Included dataset names:
 
 - `PEMS03`
 - `PEMS07`
@@ -16,22 +17,19 @@ Expected dataset names:
 - `PEMS-BAY`
 - `METR-LA`
 
-Recommended local layout:
-
 ```text
-datasets/
-  raw/
-    PEMS03/
-    PEMS07/
-    PEMS08/
-    PEMS-BAY/
-    METR-LA/
-  processed/
-    PEMS03/
-    PEMS07/
-    PEMS08/
-    PEMS-BAY/
-    METR-LA/
+Datasets/
+  PEMS03/
+    PEMS03.npz
+    adj_matrix.csv
+    PEMS03_edges.csv
+    node_index_map.csv
+  PEMS07/
+  PEMS08/
+  PEMS-BAY/
+  METR-LA/
+spatial_fractal_vectors_<dataset>.npy
+train_timefractals_<dataset>.npy
 ```
 
-Typical files used by the training scripts include traffic matrices, adjacency matrices, edge lists, and node index maps. Generated fractal features, prepared baseline data, model checkpoints, logs, and prediction outputs should remain outside Git and are ignored by `.gitignore`.
+The training scripts read this layout directly through the default `Datasets/<dataset>/` path.
