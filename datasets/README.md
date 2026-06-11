@@ -5,7 +5,7 @@ This repository includes the processed files needed to reproduce the experiments
 - traffic time-series arrays: `Datasets/<dataset>/<dataset>.npz`
 - adjacency matrices: `Datasets/<dataset>/adj_matrix.csv`
 - optional edge lists, node maps, and sensor metadata where available
-- node-level fractal features: `spatial_fractal_vectors_<dataset>.npy` and `train_timefractals_<dataset>.npy`
+- node-level fractal features: `FractalFeatures/spatial_fractal_vectors_<dataset>.npy` and `FractalFeatures/train_timefractals_<dataset>.npy`
 
 Large raw files such as `.h5`, generated train/validation/test splits, checkpoints, prediction dumps, logs, and figures are intentionally excluded.
 
@@ -30,8 +30,9 @@ Datasets/
   PEMS08/
   PEMS-BAY/
   METR-LA/
-spatial_fractal_vectors_<dataset>.npy
-train_timefractals_<dataset>.npy
+FractalFeatures/
+  spatial_fractal_vectors_<dataset>.npy
+  train_timefractals_<dataset>.npy
 ```
 
 The training scripts read this layout directly through the default `Datasets/<dataset>/` path.

@@ -202,7 +202,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_root", type=Path, default=Path("Datasets"))
     parser.add_argument("--dataset", required=True)
-    parser.add_argument("--output_dir", type=Path, default=Path("."))
+    parser.add_argument("--output_dir", type=Path, default=Path("FractalFeatures"))
     parser.add_argument("--train_ratio", type=float, default=None)
     return parser.parse_args()
 
