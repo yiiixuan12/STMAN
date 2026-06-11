@@ -18,8 +18,7 @@ runs/
 outputs/
 experiments/
 prepared_data/
-paper_responce/
-paper_response/
+manuscript_artifacts/
 wandb/
 
 *.pt
@@ -39,6 +38,17 @@ wandb/
 *.jpg
 *.jpeg
 *.ipynb
+
+!Datasets/
+!Datasets/**/
+!Datasets/**/*.npz
+!Datasets/**/*.csv
+!Datasets/**/*.pkl
+!Datasets/**/*.txt
+!spatial_fractal_vectors_*.npy
+!train_timefractals_*.npy
+!scripts/run_stman_all.sh
+!baselines/run_baseline.sh
 
 .env
 .venv/

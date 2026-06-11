@@ -139,7 +139,7 @@ def compute_spatial_r2(adj_matrix, min_scale=1, max_scale=8, num_scales=8):
     n_nodes = adj_matrix.shape[0]
 
     # Compute shortest-path distance matrix. Keep this self-contained because the
-    # ROCm training environment used for revision runs does not install scipy.
+    # Some ROCm training environments do not install scipy.
     dist_adj = adj_matrix.astype(float)
     dist_adj[dist_adj == 0] = np.inf
     np.fill_diagonal(dist_adj, 0)
@@ -230,7 +230,7 @@ def parse_args():
     parser.add_argument(
         "--output_dir",
         type=Path,
-        default=Path(__file__).resolve().parents[2] / "results" / "revision_audit_r2",
+        default=Path(__file__).resolve().parents[2] / "results" / "r2_goodness",
         help="directory for CSV/manifest outputs",
     )
     parser.add_argument(
@@ -359,7 +359,7 @@ if __name__ == "__main__":
     print(f"{'='*100}")
 
     # Also print in the exact requested format
-    print(f"\n\nTable for paper:")
+    print(f"\n\nLaTeX table:")
     print(f"{'Dataset':<12} | {'Temporal R^2 (mean +/- std)':^30} | {'Spatial R^2 (mean +/- std)':^30} | {'Min R^2':^12}")
     print(f"{'-'*12}-+-{'-'*30}-+-{'-'*30}-+-{'-'*12}")
     for r in results:

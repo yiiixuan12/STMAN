@@ -8,11 +8,22 @@ def load_st_dataset(dataset):
     """
     custom_root = os.environ.get("TABLE4_CUSTOM_DATA_ROOT")
     if custom_root:
-        custom_path = os.path.join(custom_root, dataset, f"{dataset}.npz")
-        if os.path.exists(custom_path):
-            data = np.load(custom_path)['data'][:, :, 0]
-        else:
-            data = None
+        aliases = {
+            "METRLA": ("METR-LA", "METR-LA"),
+            "PEMSBAY": ("PEMS-BAY", "PEMS-BAY"),
+            "PEMSD3": ("PEMS03", "PEMS03"),
+            "PEMSD7": ("PEMS07", "PEMS07"),
+            "PEMSD8": ("PEMS08", "PEMS08"),
+        }
+        candidates = [(dataset, dataset)]
+        if dataset in aliases:
+            candidates.insert(0, aliases[dataset])
+        data = None
+        for folder, stem in candidates:
+            custom_path = os.path.join(custom_root, folder, f"{stem}.npz")
+            if os.path.exists(custom_path):
+                data = np.load(custom_path)['data'][:, :, 0]
+                break
     else:
         data = None
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Retrain LSTNN/PDFormer Table III cells with auditable 6:2:2 testing.
+"""Retrain LSTNN/PDFormer Table III cells with reproducible 6:2:2 testing.
 
 This runner is intentionally separate from the legacy Excel/table exporters.
 Each cell trains from the local dataset files, evaluates the returned best
@@ -107,7 +107,7 @@ def default_seq_len(model: str, dataset: str, horizon: int) -> int:
 def build_job_specs(args: argparse.Namespace) -> list[JobSpec]:
     root = args.root.resolve()
     package_root = package_root_from_code_root(root)
-    run_root = package_root / "results" / "revision_baselines_table3_retrain" / args.run_id
+    run_root = package_root / "results" / "baseline_table3_runs" / args.run_id
     models = [normalize_model(item) for item in parse_csv_list(args.models, MODELS)]
     datasets = [normalize_dataset(item) for item in parse_csv_list(args.datasets, DATASETS)]
     horizons = parse_int_list(args.horizons, HORIZONS)
@@ -505,7 +505,7 @@ def run_single(args: argparse.Namespace) -> int:
     run_dir = Path(args.run_dir) if args.run_dir else (
         package_root_from_code_root(args.root)
         / "results"
-        / "revision_baselines_table3_retrain"
+        / "baseline_table3_runs"
         / args.run_id
         / model
         / dataset_key(dataset)
@@ -620,7 +620,7 @@ def summary_completed(path: Path) -> bool:
 
 def launch_queue(args: argparse.Namespace) -> int:
     jobs = build_job_specs(args)
-    run_root = package_root_from_code_root(args.root) / "results" / "revision_baselines_table3_retrain" / args.run_id
+    run_root = package_root_from_code_root(args.root) / "results" / "baseline_table3_runs" / args.run_id
     run_root.mkdir(parents=True, exist_ok=True)
     write_csv(run_root / "queue_manifest.csv", [{**asdict(job), "run_dir": str(job.run_dir)} for job in jobs])
 
