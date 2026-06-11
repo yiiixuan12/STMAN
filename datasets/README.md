@@ -1,6 +1,6 @@
 # Dataset Organization
 
-This repository includes the lightweight processed files needed to reproduce the experiments:
+This repository includes the processed files needed to reproduce the experiments. Large arrays are managed by Git LFS; after cloning, run `git lfs pull` to download the actual data files.
 
 - traffic time-series arrays: `Datasets/<dataset>/<dataset>.npz`
 - adjacency matrices: `Datasets/<dataset>/adj_matrix.csv`
