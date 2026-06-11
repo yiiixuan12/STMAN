@@ -14,7 +14,6 @@ This is the code repository for **Urban Wide-Area Traffic Flow Forecasting: A Sp
 - `baselines/`: source-only baseline implementations and launch scripts.
 - `scripts/`: analysis, orchestration, and revision-audit utilities.
 - `datasets/README.md`: local dataset layout instructions.
-- `tests/`: lightweight code checks for core model and training policies.
 - `requirements.txt`: Python dependencies.
 
 
