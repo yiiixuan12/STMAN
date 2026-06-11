@@ -20,6 +20,13 @@ Processed traffic arrays, adjacency matrices, and node-level fractal features ar
 
 ## Quick Start
 
+Install Git LFS and pull the processed data files:
+
+```bash
+git lfs install
+git lfs pull
+```
+
 Run STMAN on one dataset:
 
 ```bash
