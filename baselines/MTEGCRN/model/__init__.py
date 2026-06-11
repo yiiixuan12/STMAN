@@ -1,0 +1,1 @@
+"""MTEGCRN model components."""

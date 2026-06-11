@@ -7,6 +7,8 @@ __pycache__/
 .ipynb_checkpoints/
 
 Datasets/
+datasets/raw/
+datasets/processed/
 data/
 results/
 checkpoint/
@@ -14,6 +16,11 @@ checkpoints/
 logs/
 runs/
 outputs/
+experiments/
+prepared_data/
+paper_responce/
+paper_response/
+wandb/
 
 *.pt
 *.pth
