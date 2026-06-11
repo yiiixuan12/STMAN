@@ -10,7 +10,6 @@ This is the code repository for **Urban Wide-Area Traffic Flow Forecasting: A Sp
 - `utils.py`: data loading, preprocessing, calendar features, adjacency loading, and schedulers.
 - `metric.py`: STMAN loss and metric utilities.
 - `fractal_features.py`: temporal MF-DFA and spatial fractal feature extraction.
-- `batch_eval.py`: batch evaluation utilities.
 - `export_stman_predictions.py`: prediction export utility.
 - `baselines/`: source-only baseline implementations and launch scripts.
 - `scripts/`: analysis, orchestration, and revision-audit utilities.
