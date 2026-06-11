@@ -1,3 +1,9 @@
 numpy
 pandas
 torch
+matplotlib
+scipy
+einops
+torchinfo
+tqdm
+pytest

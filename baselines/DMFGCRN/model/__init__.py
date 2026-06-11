@@ -1,0 +1,1 @@
+"""DMFGCRN model components."""
