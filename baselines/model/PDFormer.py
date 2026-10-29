@@ -49,8 +49,8 @@ class TokenEmbedding(nn.Module):
 
 class PositionalEncoding(nn.Module):
     """
-    动态生成正弦位置编码：不受 max_len 限制，自动适配 (T, D/设备/精度)。
-    返回形状 (1, T, N, D) 以便与 (B, T, N, D) 广播相加。
+    Generate sinusoidal positional encodings dynamically without a max_len limit; adapt to T, D, device, and dtype.
+    Return shape (1, T, N, D) for broadcast addition to (B, T, N, D).
     """
     def __init__(self, embed_dim: int):
         super().__init__()
@@ -499,8 +499,8 @@ class PDFormer(nn.Module):
             for _ in range(enc_depth)
         ])
 
-        # 时间维映射：T_in -> r -> T_out（比直接 T_in->T_out 更省参/快）
-        r = min(64, self.input_window, self.output_window)  # 也可设成超参
+        # Temporal mapping: T_in -> r -> T_out (fewer parameters/faster than direct T_in->T_out)
+        r = min(64, self.input_window, self.output_window)  # Can also be a hyperparameter
         self.end_t_down = nn.Conv2d(self.input_window, r, kernel_size=1, bias=False)
         self.end_t_up   = nn.Conv2d(r, self.output_window, kernel_size=1, bias=True)
 
@@ -547,11 +547,11 @@ class PDFormer(nn.Module):
             enc = encoder_block(enc, x_patterns, pattern_keys, self.geo_mask, self.sem_mask)
             skip = skip + self.skip_convs[i](enc.permute(0, 3, 2, 1))  # (B, skip_dim, N, T)
 
-        # 时间维 1x1 卷积：先把 T 放到通道维 (B, T, N, skip_dim)
+        # Temporal 1x1 convolution: first move T to the channel dimension (B, T, N, skip_dim)
         skip = F.relu(skip.permute(0, 3, 2, 1))                 # (B, T_in, N, skip_dim)
         skip = self.end_t_up(F.relu(self.end_t_down(skip)))     # (B, T_out, N, skip_dim)
 
-        # 输出维度映射到 out_dim
+        # Map the output dimension to out_dim
         skip = self.end_conv2(F.relu(skip.permute(0, 3, 2, 1)))  # (B, out_dim, N, T_out)
         return skip.permute(0, 3, 2, 1)                          # (B, T_out, N, out_dim)
 

@@ -94,7 +94,7 @@ def normalize_dataset(data, normalizer, column_wise=False):
 
 
 def split_data_by_days(data, val_days, test_days, interval=30):
-    """按天数划分数据"""
+    """Split data into training, validation, and test sets by day."""
     T = int((24 * 60) / interval)
     test_data = data[-T * int(test_days):]
     val_data = data[-T * int(test_days + val_days): -T * int(test_days)]
@@ -176,24 +176,24 @@ def get_advanced_time_features(dataset_name, time_stamps, num_nodes, steps_per_d
     else:
         start_date = datetime(2020, 1, 1)
 
-    time_features = np.zeros((time_stamps, num_nodes, 5))  # 5个时间特征
+    time_features = np.zeros((time_stamps, num_nodes, 5))  # Five time features
     current_date = start_date
 
     for t in range(time_stamps):
-        # 1. Time of Day (归一化)
+        # 1. Time of Day (normalized)
         time_features[t, :, 0] = (t % steps_per_day) / steps_per_day
 
-        # 2. Day of Week (归一化)
+        # 2. Day of Week (normalized)
         time_features[t, :, 1] = current_date.weekday() / 7.0
 
-        # 3. Hour of Day (归一化到[0,1])
+        # 3. Hour of Day (normalized to [0, 1])
         hour = (t % steps_per_day) * 24 / steps_per_day
         time_features[t, :, 2] = hour / 24.0
 
         # 4. Is Weekend (0 or 1)
         time_features[t, :, 3] = 1.0 if current_date.weekday() >= 5 else 0.0
 
-        # 5. Month (归一化到[0,1])
+        # 5. Month (normalized to [0, 1])
         time_features[t, :, 4] = (current_date.month - 1) / 11.0
 
         current_date = current_date + timedelta(minutes=interval_minutes)

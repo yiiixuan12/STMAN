@@ -124,8 +124,8 @@ class Trainer(object):
             #data and target shape: B, T, N, F; output shape: B, T, N, F
             output = self.model(data,i)
             if self.args.real_value:
-                #原本这边它是只反归一化了label，修改后发现效果比论文里面的效果高了3个点，后面两年顶会能发出去真的是靠AGCRN的作者没发现这个问题
-                #上面和下面都修改了，不然就是都只反归一化label
+                # Inverse-transform predictions before computing the loss.
+                # Leave labels unchanged.
                 output = self.scaler.inverse_transform(output)
                 # label = self.scaler.inverse_transform(label)
 
@@ -167,7 +167,7 @@ class Trainer(object):
         test_loss = []
         train_time = []
         train_M = []
-        self.logger.info("第一层训练")
+        self.logger.info("First-layer training")
         for epoch in range(1, 0):
 
             # epoch_time = time.time()
@@ -220,7 +220,7 @@ class Trainer(object):
             if test_epoch_loss< best_test_loss:
                 best_test_loss = test_epoch_loss
                 best_test_model = copy.deepcopy(self.model.state_dict())
-        self.logger.info("两层训练")
+        self.logger.info("Two-layer training")
         for epoch in tqdm(range(1, self.args.epochs + 1)):
 
             # epoch_time = time.time()

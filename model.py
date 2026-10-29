@@ -55,9 +55,9 @@ def zscore(x: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
 # ----------------------------
 class SpatialMixing(nn.Module):
     """
-    空间混合层：利用分形偏置引导的图卷积实现节点间信息交换。
-    在每个时间步独立地进行空间聚合。
-    S = softmax(B)   B是分形注意力偏置矩阵[N,N]
+    Spatial mixing layer: exchange node information through fractal-bias-guided graph convolution.
+    Perform spatial aggregation independently at each time step.
+    S = softmax(B)   B is the fractal attention bias matrix [N,N]
     X' = LayerNorm(X + W_o * (S @ X @ W_v))
     """
     def __init__(self, d_model: int, dropout: float = 0.1):
@@ -70,20 +70,20 @@ class SpatialMixing(nn.Module):
     def forward(self, x: torch.Tensor, S: torch.Tensor) -> torch.Tensor:
         """
         x: [B, T, N, d]
-        S: [N, N]  softmax后的空间注意力权重
+        S: [N, N]  spatial attention weights after softmax
         return: [B, T, N, d]
         """
         v = self.W_v(x)                           # [B, T, N, d]
-        agg = torch.einsum('mn,btnd->btmd', S, v)  # [B, T, N, d]  空间聚合
+        agg = torch.einsum('mn,btnd->btmd', S, v)  # [B, T, N, d]  spatial aggregation
         out = self.W_o(self.dropout(agg))          # [B, T, N, d]
-        return self.ln(x + out)                    # 残差 + LayerNorm
+        return self.ln(x + out)                    # Residual + LayerNorm
 
 
 class SpatialMixingGCN(nn.Module):
     """
-    多跳图卷积空间混合层，专为稀疏图设计（如PEMS07链式结构）。
-    使用K-hop邻接多项式滤波器替代密集softmax注意力。
-    支持可学习的多跳权重，让模型自适应确定每一跳的重要性。
+    Multi-hop graph convolution spatial mixer for sparse graphs (e.g., the PEMS07 chain structure).
+    Use K-hop adjacency polynomial filters in place of dense softmax attention.
+    Learn hop weights so the model can adapt the importance of each hop.
     X' = LayerNorm(X + W_o * (A_khop @ X @ W_v))
     """
     def __init__(self, d_model: int, k_hop: int = 8, dropout: float = 0.1):
@@ -93,7 +93,7 @@ class SpatialMixingGCN(nn.Module):
         self.W_o = nn.Linear(d_model, d_model, bias=False)
         self.ln = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(dropout)
-        # 可学习的每跳权重（softmax归一化）
+        # Learnable per-hop weights (softmax-normalized)
         self.hop_weights = nn.Parameter(torch.zeros(k_hop + 1))
 
     def forward(self, x: torch.Tensor, A_hops: list) -> torch.Tensor:
@@ -103,7 +103,7 @@ class SpatialMixingGCN(nn.Module):
         return: [B, T, N, d]
         """
         v = self.W_v(x)  # [B, T, N, d]
-        # 对每一跳的聚合结果进行加权求和
+        # Compute a weighted sum of aggregation results across hops
         w = F.softmax(self.hop_weights, dim=0)
         agg = torch.zeros_like(v)
         for k, A_k in enumerate(A_hops):
@@ -159,23 +159,23 @@ class SpatialMixingHybrid(nn.Module):
 # ----------------------------
 class STEncoderBlock(nn.Module):
     """
-    时空编码器块：先做时间自注意力，再做空间图卷积。
-    支持三种空间混合模式: attention(密集注意力), gcn(多跳图卷积),
-    hybrid(多跳图卷积+分形注意力融合)。
+    Spatiotemporal encoder block: temporal self-attention followed by spatial graph convolution.
+    Support three spatial mixing modes: attention (dense attention), gcn (multi-hop graph convolution),
+    hybrid (multi-hop graph convolution fused with fractal attention).
     """
     def __init__(self, d_model: int, n_heads: int, ff_multiplier: int = 4,
                  dropout: float = 0.1, spatial_mode: str = "attention",
                  k_hop: int = 8):
         super().__init__()
         self.spatial_mode = spatial_mode
-        # 时间自注意力
+        # Temporal self-attention
         self.temporal_attn = nn.TransformerEncoderLayer(
             d_model=d_model, nhead=n_heads,
             dim_feedforward=ff_multiplier * d_model,
             dropout=dropout, batch_first=False,
             activation="gelu", norm_first=True,
         )
-        # 空间混合: 根据模式选择
+        # Spatial mixing: select by mode
         if spatial_mode == "gcn":
             self.spatial_mix = SpatialMixingGCN(d_model, k_hop=k_hop, dropout=dropout)
         elif spatial_mode == "hybrid":
@@ -192,12 +192,12 @@ class STEncoderBlock(nn.Module):
         """
         B, T, N, d = x_4d.shape
 
-        # 1) 时间自注意力: reshape to [T, B*N, d]
+        # 1) Temporal self-attention: reshape to [T, B*N, d]
         x_t = x_4d.permute(1, 0, 2, 3).contiguous().view(T, B * N, d)
         x_t = self.temporal_attn(x_t)  # [T, B*N, d]
         x_4d = x_t.view(T, B, N, d).permute(1, 0, 2, 3).contiguous()  # [B, T, N, d]
 
-        # 2) 空间混合
+        # 2) Spatial mixing
         x_4d = self.spatial_mix(x_4d, S_spatial)  # [B, T, N, d]
 
         return x_4d
@@ -303,7 +303,7 @@ class STFractalTransformer(nn.Module):
         direct_step_refine: bool = False,
         decoder_future_tod: bool = True,
         spatial_mode: str = "attention",  # "attention" | "gcn" | "hybrid"
-        k_hop: int = 8,                   # GCN模式下的多跳数
+        k_hop: int = 8,                   # Number of hops in GCN mode
         gated_residual: bool = False,
         use_future_time_features: bool = False,
         time_feature_start: int = None,
@@ -329,47 +329,47 @@ class STFractalTransformer(nn.Module):
         self.use_future_time_features = bool(use_future_time_features and self.time_feature_dim > 0)
         self.tod_idx = self.time_feature_start if self.time_feature_dim > 0 else None
 
-        # 1) 分形嵌入
+        # 1) Fractal embedding
         self.sf_proj = nn.Sequential(nn.Linear(sf_dim, d_model), nn.Dropout(dropout))
         self.tf_proj = nn.Sequential(nn.Linear(tf_dim, d_model), nn.Dropout(dropout))
         self.ln_sf = nn.LayerNorm(d_model)
         self.ln_tf = nn.LayerNorm(d_model)
 
-        # 2) 双向注意力
+        # 2) Bidirectional attention
         self.biattn = STBidirectionalAttention(
             d_model=d_model, n_heads=n_heads,
             dropout=dropout, use_bias_zscore=use_bias_zscore, bias_eps=1e-3
         )
 
-        # 3) 融合
+        # 3) Fusion
         self.fuse = nn.Sequential(
             nn.Linear(2 * d_model, d_model), nn.GELU(),
             nn.Dropout(dropout), nn.LayerNorm(d_model),
         )
 
-        # 4) 投影
+        # 4) Projection
         self.in_proj = nn.Linear(in_dim, d_model)
         self.out_hidden = nn.Linear(d_model, d_model)
         self.out_proj = nn.Linear(d_model, self.out_dim)
 
-        # 5) 位置编码（编码器共用）
+        # 5) Positional encoding (shared by encoders)
         self.pos_enc = PositionalEncoding(d_model=d_model, max_len=max(seq_len, pred_len) + 512)
 
-        # 6) 时空编码器：每层包含 时间自注意力 + 空间混合（attention或gcn）
+        # 6) Spatiotemporal encoder: each layer contains temporal self-attention + spatial mixing (attention or gcn)
         self.st_encoder = nn.ModuleList([
             STEncoderBlock(d_model, n_heads, ff_multiplier, dropout,
                            spatial_mode=spatial_mode, k_hop=k_hop)
             for _ in range(num_encoder_layers)
         ])
 
-        # 7) 解码器 或 直接预测头（二选一）
+        # 7) Decoder or direct prediction head (choose one)
         if use_direct_pred:
-            # 分组预测：将 pred_len 分成 n_chunks，每 chunk 用独立 embedding + 共享 MLP
-            self._dp_chunk_size = min(12, pred_len)  # 每组最多12步
+            # Chunked prediction: split pred_len into n_chunks, each with its own embedding + a shared MLP
+            self._dp_chunk_size = min(12, pred_len)  # At most 12 steps per chunk
             self._dp_n_chunks = (pred_len + self._dp_chunk_size - 1) // self._dp_chunk_size
             self._dp_last_chunk = pred_len - self._dp_chunk_size * (self._dp_n_chunks - 1)
             if direct_head_mode == "chunkwise":
-                # 为每个未来 chunk 学一组独立的时间聚合权重，避免把整段历史压成单点
+                # Learn separate temporal aggregation weights for each future chunk to avoid compressing all history into one point
                 self.temporal_chunk_proj = nn.Linear(seq_len, self._dp_n_chunks, bias=False)
                 self.chunk_emb = nn.Embedding(self._dp_n_chunks, d_model)
                 self.future_time_proj = nn.Linear(self.time_feature_dim, d_model, bias=False) if self.use_future_time_features else None
@@ -380,8 +380,8 @@ class STFractalTransformer(nn.Module):
                     nn.Linear(d_model * 2, self._dp_chunk_size * self.out_dim),
                 )
             elif direct_head_mode == "attn":
-                # 为每个未来 chunk 学一个查询向量，对编码历史做内容自适应聚合。
-                # 相比固定 temporal_chunk_proj，它能在平台期任务中重新选择有效历史片段。
+                # Learn a query vector for each future chunk for content-adaptive aggregation of the encoded history.
+                # Compared with a fixed temporal_chunk_proj, this can reselect useful historical segments when task performance plateaus.
                 self.chunk_query = nn.Embedding(self._dp_n_chunks, d_model)
                 self.temporal_key = nn.Linear(d_model, d_model, bias=False)
                 self.chunk_emb = nn.Embedding(self._dp_n_chunks, d_model)
@@ -393,11 +393,11 @@ class STFractalTransformer(nn.Module):
                     nn.Linear(d_model * 2, self._dp_chunk_size * self.out_dim),
                 )
             elif direct_head_mode == "linear":
-                # 兼容早期 v11/v6 系列 checkpoint：单 temporal_agg + 线性直接输出全 horizon
+                # Compatibility with early v11/v6 checkpoints: one temporal_agg + a linear layer for the full horizon
                 self.temporal_agg = nn.Linear(seq_len, 1, bias=False)
                 self.out_proj_direct = nn.Linear(d_model, pred_len * self.out_dim)
             else:
-                # 兼容早期 chunked-direct checkpoint：temporal_agg + chunk_emb + chunk_mlp
+                # Compatibility with early chunked-direct checkpoints: temporal_agg + chunk_emb + chunk_mlp
                 self.temporal_agg = nn.Linear(seq_len, 1, bias=False)
                 self.chunk_emb = nn.Embedding(self._dp_n_chunks, d_model)
                 self.future_time_proj = nn.Linear(self.time_feature_dim, d_model, bias=False) if self.use_future_time_features else None
@@ -408,9 +408,9 @@ class STFractalTransformer(nn.Module):
                     nn.Linear(d_model * 2, self._dp_chunk_size * self.out_dim),
                 )
             if self.direct_step_refine:
-                # 零初始化的逐步 residual refiner：
-                # 1) 兼容旧 checkpoint 的 model-only warm start
-                # 2) 在不破坏旧 chunkwise 输出的前提下，补足 chunk 内逐步校准能力
+                # Zero-initialized per-step residual refiner:
+                # 1) Support model-only warm starts from older checkpoints
+                # 2) Add per-step calibration within chunks while preserving the existing chunkwise output
                 self.chunk_step_emb = nn.Embedding(self._dp_chunk_size, d_model)
                 self.future_step_time_proj = nn.Linear(self.time_feature_dim, d_model, bias=False) if self.use_future_time_features else None
                 self.step_refine = nn.Sequential(
@@ -422,7 +422,7 @@ class STFractalTransformer(nn.Module):
                 nn.init.zeros_(self.step_refine[-1].weight)
                 nn.init.zeros_(self.step_refine[-1].bias)
         else:
-            # 自回归解码器（原始结构）
+            # Autoregressive decoder (original architecture)
             self.dec_step_emb = nn.Embedding(pred_len, d_model)
             dec_layer = nn.TransformerDecoderLayer(
                 d_model=d_model, nhead=n_heads,
@@ -452,13 +452,13 @@ class STFractalTransformer(nn.Module):
 
     @staticmethod
     def _precompute_khop(A_raw, k_hop):
-        """预计算K-hop邻接矩阵列表。
-        A_raw 在外部通常已经做过对称归一化，这里只做逐跳幂和逐行归一化，避免双重归一化。"""
+        """Precompute the list of K-hop adjacency matrices.
+        A_raw is usually symmetrically normalized externally; only compute successive powers and row-normalize here to avoid double normalization."""
         N = A_raw.shape[0]
         hops = [torch.eye(N, device=A_raw.device, dtype=A_raw.dtype)]  # k=0: I
         A_power = A_raw.clone()
         for k in range(1, k_hop + 1):
-            # 行归一化（保证每跳的聚合权重和=1）
+            # Row normalization (ensure aggregation weights sum to 1 for each hop)
             row_sum = A_power.sum(dim=1, keepdim=True).clamp_min(1e-8)
             hops.append(A_power / row_sum)
             if k < k_hop:
@@ -524,14 +524,14 @@ class STFractalTransformer(nn.Module):
         E_s = self.ln_sf(self.sf_proj(SF))
         E_t = self.ln_tf(self.tf_proj(TF))
 
-        # 2) Bidirectional attention → 得到节点表征 + 空间注意力权重
+        # 2) Bidirectional attention → Obtain node representations + spatial attention weights
         H_cat, S_s2t, S_t2s, B_st, B_ts = self.biattn(E_s, E_t, A)
         H_node = self.fuse(H_cat)  # [N, d]
 
-        # 空间混合权重：根据模式选择
+        # Spatial mixing weights: select by mode
         S_attention = (S_s2t + S_t2s) / 2.0  # [N, N]
         if self.spatial_mode == "gcn":
-            # GCN模式：使用多跳邻接矩阵
+            # GCN mode: use multi-hop adjacency matrices
             if not hasattr(self, '_A_hops_cache') or self._A_hops_cache is None:
                 self._A_hops_cache = self._precompute_khop(A, self.k_hop)
             S_spatial = self._A_hops_cache
@@ -540,7 +540,7 @@ class STFractalTransformer(nn.Module):
                 self._A_hops_cache = self._precompute_khop(A, self.k_hop)
             S_spatial = (S_attention, self._A_hops_cache)
         else:
-            # Attention模式（默认）：平均两个方向的注意力
+            # Attention mode (default): average attention across both directions
             S_spatial = S_attention
 
         # 3) Encoder input
@@ -549,7 +549,7 @@ class STFractalTransformer(nn.Module):
         x_emb = x_emb + H_node.view(1, 1, N, self.d_model)
         x_emb = self.ln_embed(self.dropout_layer(x_emb))              # [B, T, N, d]
 
-        # 4) 时空编码器：交替进行时间注意力和空间混合
+        # 4) Spatiotemporal encoder: alternate temporal attention and spatial mixing
         h_enc = x_emb
         for layer in self.st_encoder:
             h_enc = layer(h_enc, S_spatial)                            # [B, T, N, d]
@@ -558,9 +558,9 @@ class STFractalTransformer(nn.Module):
         future_time = self._infer_future_time_features(x)
         decoder_future_time = future_time if self.decoder_future_tod else None
         if self.use_direct_pred:
-            # 直接预测路径（分组MLP）:
-            # legacy: 单一 temporal_agg 压缩整段历史
-            # chunkwise: 为每个未来 chunk 学独立的时间聚合，降低长步长信息损失
+            # Direct prediction path (chunked MLP):
+            # legacy: A single temporal_agg compresses the full history
+            # chunkwise: Learn independent temporal aggregation for each future chunk to reduce information loss over long horizons
             h_time = h_enc.permute(0, 2, 3, 1)  # [B, N, d, T]
             if self.direct_head_mode == "chunkwise":
                 h_chunk = self.temporal_chunk_proj(h_time).permute(0, 3, 1, 2).contiguous()  # [B, C, N, d]
@@ -604,7 +604,7 @@ class STFractalTransformer(nn.Module):
                 y_hat = y_hat.view(B, N, self.pred_len, self.out_dim)
                 y_hat = y_hat.permute(0, 2, 1, 3).contiguous()  # [B, pred_len, N, out_dim]
         else:
-            # 自回归解码器路径（原始结构）
+            # Autoregressive decoder path (original architecture)
             mem = h_enc.permute(1, 0, 2, 3).contiguous().view(T_in, B * N, self.d_model)
 
             if y_in is not None:
@@ -631,7 +631,7 @@ class STFractalTransformer(nn.Module):
             h = F.gelu(self.out_hidden(dec_out))
             y_hat = self.out_proj(h).view(self.pred_len, B, N, self.out_dim).permute(1, 0, 2, 3).contiguous()
 
-        # 6) 残差修正（两条路径共用）
+        # 6) Residual correction (shared by both paths)
         if self.residual_delta:
             y_hat = self._apply_residual_delta(y_hat, x, h_enc, future_time)
 

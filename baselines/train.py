@@ -4,30 +4,30 @@ import os
 import time
 from typing import Optional, Dict
 from types import SimpleNamespace
-from contextlib import nullcontext  # AMP 需要
+from contextlib import nullcontext  # Required for AMP
 
 import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
-# 原有模型
+# Existing models
 from model.TGCN import TGCNForecaster
 from model.STGCN import STGCNChebGraphConv, STGCNGraphConv
-# LSTNN（即 MultiscaleMLP 的顶层类）
+# LSTNN (the top-level MultiscaleMLP class)
 from model.LSTNN import MultiscaleMLP
-# === 新增：STAEformer ===
+# === Added: STAEformer ===
 from model.STAEformer import STAEformer
 
-# === 新增：PDFormer ===
-from model.PDFormer import PDFormer  # 如果你把 pdformer.py 放在 model/ 下
+# === Added: PDFormer ===
+from model.PDFormer import PDFormer  # Assumes pdformer.py is under model/
 
 
 from metric import HuberRegLoss
-from utils import build_gso_for_stgcn  # STGCN 的 GSO 构造
+from utils import build_gso_for_stgcn  # GSO construction for STGCN
 
 # ----------------------------
-# 小工具
+# Utilities
 # ----------------------------
 def _amp_enabled_for(device: torch.device) -> bool:
     disabled = os.environ.get("BASELINE_DISABLE_AMP", "0").strip().lower()
@@ -35,87 +35,87 @@ def _amp_enabled_for(device: torch.device) -> bool:
 
 
 def _compute_shortest_path_dist(A: np.ndarray) -> np.ndarray:
-    """基于权重的最短路 (Floyd-Warshall)。A>=0，0 代表无边或权重为0（视为不可达）。"""
+    """Weighted shortest paths (Floyd-Warshall). A>=0; 0 means no edge or zero weight (treated as unreachable)."""
     N = A.shape[0]
     INF = 1e12
     W = A.copy().astype(np.float64)
     D = np.where(W > 0, W, INF)
     np.fill_diagonal(D, 0.0)
     for k in range(N):
-        # 向量化松弛
+        # Vectorized relaxation
         D = np.minimum(D, D[:, [k]] + D[[k], :])
     return D
 
 def _compute_hop_dist(A: np.ndarray) -> np.ndarray:
-    """无权图最短跳数距离（把有边视为权重=1，Floyd-Warshall 一次到位）"""
-    G = (A > 0).astype(np.float32)             # 二值化
+    """Unweighted shortest hop distances (unit edge weights, computed once with Floyd-Warshall)"""
+    G = (A > 0).astype(np.float32)             # Binarize
     N = G.shape[0]
     INF = 1e12
-    D = np.where(G > 0, 1.0, INF)              # 有边 -> 1
+    D = np.where(G > 0, 1.0, INF)              # Edge -> 1
     np.fill_diagonal(D, 0.0)
-    for k in range(N):                          # O(N^3)，但只做一次
+    for k in range(N):                          # O(N^3), computed only once
         D = np.minimum(D, D[:, [k]] + D[[k], :])
-    D[D >= INF/2] = N + 1                       # 不可达：设为一个大值
+    D[D >= INF/2] = N + 1                       # Unreachable: use a large value
     return D.astype(np.float32)
 
 def _laplacian_positional_eigvecs(adj: torch.Tensor, k: int) -> torch.Tensor:
     """
-    稳健版：计算归一化拉普拉斯 L = I - D^{-1/2} A D^{-1/2} 的前 k 个（最小）特征向量
-    - 强制清洗 A：去 NaN/Inf、裁负数、对称化
-    - 保证 L 严格对称：0.5*(L+L^T)
-    - 用 torch.linalg.eigh 在 CPU/float64 上分解，失败则加 jitter 再试
-    - 最后兜底：返回 I 的前 k 列
+    Robustly compute the k smallest eigenvectors of the normalized Laplacian L = I - D^{-1/2} A D^{-1/2}
+    - Clean A: remove NaN/Inf, clip negative values, and symmetrize
+    - Ensure exact symmetry of L: 0.5*(L+L^T)
+    - Decompose with torch.linalg.eigh on CPU/float64; retry with jitter on failure
+    - Final fallback: return the first k columns of I
     """
-    assert k >= 1, "k (lape_dim) 必须 >= 1"
+    assert k >= 1, "k (lape_dim) must be >= 1"
     with torch.no_grad():
-        # ---- 取到 CPU 上做数值稳定的分解 ----
+        # ---- Move to CPU for numerically stable decomposition ----
         A = adj.detach().cpu().to(dtype=torch.float64).numpy()
         N = A.shape[0]
         if k > N:
             k = N
 
-        # ---- 清洗 & 对称化 ----
+        # ---- Clean and symmetrize ----
         A = np.nan_to_num(A, nan=0.0, posinf=0.0, neginf=0.0)
         A = np.clip(A, a_min=0.0, a_max=None)
         A = 0.5 * (A + A.T)
-        # 可选：去除极端大权重（避免病态条件数）
+        # Optionally clip extreme weights to avoid ill-conditioning
         if np.isfinite(A).any():
             p99 = np.percentile(A[A > 0], 99) if np.any(A > 0) else 0.0
             if p99 > 0:
                 A = np.minimum(A, p99)
 
-        # ---- 归一化拉普拉斯 ----
+        # ---- Normalized Laplacian ----
         d = A.sum(axis=1)
         d = np.where(np.isfinite(d), d, 0.0) + 1e-12
         dinvs = 1.0 / np.sqrt(d)
         A_sym = (dinvs[:, None] * A) * dinvs[None, :]
         I = np.eye(N, dtype=np.float64)
         L = I - A_sym
-        L = 0.5 * (L + L.T)  # 保证严格对称
+        L = 0.5 * (L + L.T)  # Ensure exact symmetry
 
-        # ---- 尝试特征分解 ----
+        # ---- Attempt eigendecomposition ----
         def eigh_with_retry(M: np.ndarray, jitter: float):
             MM = M.copy()
             if jitter > 0:
                 MM[np.arange(N), np.arange(N)] += jitter
-            # 用 CPU / float64 做分解更稳
+            # Decomposition on CPU / float64 is more stable
             M_t = torch.from_numpy(MM)
-            evals, evecs = torch.linalg.eigh(M_t)  # 全量分解，N≈几百没问题
+            evals, evecs = torch.linalg.eigh(M_t)  # Full decomposition is feasible for N of a few hundred
             return evals.numpy(), evecs.numpy()
 
         try:
             evals, evecs = eigh_with_retry(L, jitter=0.0)
         except Exception:
             try:
-                # 轻微抖动，缓解半正定/近奇异
+                # Small jitter helps with semidefinite or nearly singular matrices
                 evals, evecs = eigh_with_retry(L, jitter=1e-8)
             except Exception:
-                # 兜底：不用位置编码，返回 I 的前 k 列（等价于没有空间 PE）
+                # Fallback: return the first k columns of I instead of positional eigenvectors (no spatial PE)
                 eye_k = np.eye(N, k, dtype=np.float64)
                 U = torch.from_numpy(eye_k).to(dtype=torch.float32, device=adj.device)
                 return U
 
-        # ---- 取最小的 k 个特征向量 ----
+        # ---- Select the k smallest eigenvectors ----
         idx = np.argsort(evals)[:k]
         U = evecs[:, idx].astype(np.float64)   # (N,k)
         U = torch.from_numpy(U).to(dtype=torch.float32, device=adj.device)
@@ -260,7 +260,7 @@ def load_checkpoint(path: str,
     return start_epoch, best_val, cfg
 
 # ----------------------------
-# 训练与评估（支持 tgcn / stgcn / lstnn / staeformer / pdformer）
+# Training and evaluation (supports tgcn / stgcn / lstnn / staeformer / pdformer)
 # ----------------------------
 def _forward_bridge(
     model: nn.Module,
@@ -269,7 +269,7 @@ def _forward_bridge(
     model_kind: str,
     teacher_forcing_ratio: float,
 ) -> torch.Tensor:
-    """把多种模型的前向统一成 [B, Tout, N, F]"""
+    """Standardize model forward outputs to [B, Tout, N, F]"""
     if model_kind == "tgcn":
         return model(x, y_teacher=y, teacher_forcing_ratio=teacher_forcing_ratio)
 
@@ -286,7 +286,7 @@ def _forward_bridge(
         elif EC == H and F == 1:
             return y_hat.squeeze(2).unsqueeze(-1).contiguous()  # [B,H,N,1]
         else:
-            raise RuntimeError(f"[STGCN] end_channel={EC} != H*F={H*F}，请把 end_channel 设为 pred_len*out_dim。")
+            raise RuntimeError(f"[STGCN] end_channel={EC} != H*F={H*F}; set end_channel to pred_len*out_dim.")
 
     if model_kind == "lstnn":
         y_hat = model(x, future_data=y)      # [B, H, N]
@@ -388,7 +388,7 @@ def evaluate(
     return meter
 
 # ----------------------------
-# 入口：训练（支持 tgcn / stgcn / lstnn / staeformer / pdformer）
+# Training entry point (supports tgcn / stgcn / lstnn / staeformer / pdformer)
 # ----------------------------
 def train_model(
     train_loader: DataLoader,
@@ -417,7 +417,7 @@ def train_model(
     finetune_lr: Optional[float] = None,
     log_txt_path: Optional[str] = None,
 
-    # ===== STGCN 超参 =====
+    # ===== STGCN hyperparameters =====
     model_kind: str = "tgcn",                         # "tgcn" / "stgcn" / "lstnn" / "staeformer" / "pdformer"
     stgcn_graph_conv_type: str = "cheb_graph_conv",   # 'cheb_graph_conv' / 'graph_conv'
     stgcn_Kt: int = 3,
@@ -426,7 +426,7 @@ def train_model(
     stgcn_droprate: float = 0.0,
     stgcn_blocks=None,
 
-    # ===== LSTNN（MultiscaleMLP）超参 =====
+    # ===== LSTNN (MultiscaleMLP) hyperparameters =====
     msmlp_patch_len: int = 24,
     msmlp_stride: int = 4,
     msmlp_td_size: int = 288,
@@ -440,7 +440,7 @@ def train_model(
     msmlp_if_spatial: bool = True,
     msmlp_num_layer: int = 2,
 
-    # ===== STAEformer 超参 =====
+    # ===== STAEformer hyperparameters =====
     stf_steps_per_day: int = 288,
     stf_input_embedding_dim: int = 24,
     stf_tod_embedding_dim: int = 24,
@@ -453,7 +453,7 @@ def train_model(
     stf_dropout: float = 0.1,
     stf_use_mixed_proj: bool = True,
 
-    # ===== PDFormer 超参（与 pdformer.py 对齐）=====
+    # ===== PDFormer hyperparameters (matching pdformer.py)=====
     pdf_embed_dim: int = 64,
     pdf_skip_dim: int = 128,
     pdf_lape_dim: int = 8,
@@ -478,7 +478,7 @@ def train_model(
     device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
     out_dim = out_dim or in_dim
 
-    # ---- 日志文件（可选）----
+    # ---- Log file (optional)----
     log_f = None
     if log_txt_path:
         headers = [
@@ -489,7 +489,7 @@ def train_model(
         ]
         log_f = _init_epoch_log(log_txt_path, headers)
 
-    # ===== 构建模型 =====
+    # ===== Build the model =====
     if model_kind == "tgcn":
         model = TGCNForecaster(
             adj=adj.to(device),
@@ -505,7 +505,7 @@ def train_model(
 
     elif model_kind == "stgcn":
         if STGCNChebGraphConv is None:
-            raise ImportError("未找到 STGCN 类。请确认已把 model/STGCN.py 放在工程根目录并可被导入。")
+            raise ImportError("STGCN class not found. Ensure model/STGCN.py exists under the project root and is importable.")
         if stgcn_blocks is None:
             end_channel = pred_len * out_dim
             stgcn_blocks = [
@@ -573,16 +573,16 @@ def train_model(
         ).to(device)
 
     elif model_kind == "pdformer":
-        # --- 准备 data_feature 所需矩阵 ---
+        # --- Prepare matrices required by data_feature ---
         A_np = adj.detach().cpu().numpy().astype(np.float32)
-        # 最短路距离（权重>0 按可达）
+        # Shortest path distances (positive weights indicate reachable edges)
         sd_mx = _compute_shortest_path_dist(A_np).astype(np.float32)
-        # hop 距离
+        # Hop distances
         sh_mx = _compute_hop_dist(A_np).astype(np.float32)
-        # 用 hop 距离近似 DTW 相似度矩阵（越小越相近）
+        # Approximate the DTW similarity matrix with hop distances (smaller means more similar)
         dtw_matrix = sh_mx.copy().astype(np.float32)
 
-        # pattern_keys: 形状 (Tin, N, s_attn_size, out_dim)
+        # pattern_keys: shape (Tin, N, s_attn_size, out_dim)
         pattern_keys = np.zeros((seq_len, n_nodes, pdf_s_attn_size, out_dim), dtype=np.float32)
         
 
@@ -616,7 +616,7 @@ def train_model(
             enc_depth=pdf_enc_depth,
             type_ln=pdf_type_ln,
             type_short_path=pdf_short_path,
-            output_dim=out_dim,           # 通常=1（只预测值）
+            output_dim=out_dim,           # Usually 1 (predict values only)
             input_window=seq_len,
             output_window=pred_len,
             add_time_in_day=False,
@@ -635,9 +635,9 @@ def train_model(
 
         model = PDFormer(config, data_feature).to(device)
 
-        # 计算拉普拉斯位置编码（(N, lape_dim)），供前向用
+        # Compute Laplacian positional encodings ((N, lape_dim)) for the forward pass
         lap_mx = _laplacian_positional_eigvecs(adj.to(device), pdf_lape_dim)  # (N, lape_dim)
-        # 挂到 model 上（_forward_bridge 里读取）
+        # Attach to model for access in _forward_bridge
         model._lap_mx = lap_mx
 
     else:
@@ -661,7 +661,7 @@ def train_model(
             optimizer, mode="min", factor=0.5, patience=3
         )
 
-    # ---- 断点续训 / 微调 ----
+    # ---- Resume training / fine-tune ----
     start_epoch = 1
     best_val = float("inf")
     best_state = None
@@ -686,7 +686,7 @@ def train_model(
     else:
         print("[Resume] No checkpoint. Train from scratch.")
 
-    # 打印 AMP 状态
+    # Print AMP status
     if _amp_enabled_for(device):
         print("[AMP] Enabled: autocast(fp16) + GradScaler")
     elif device.type == "cuda":
@@ -733,7 +733,7 @@ def train_model(
             if best_state is None:
                 best_state = {k: v.detach().cpu() for k, v in model.state_dict().items()}
 
-            # 保存 last（每轮覆盖）
+            # Save last (overwrite each epoch)
             if last_ckpt_path:
                 save_checkpoint(
                     last_ckpt_path, model,
@@ -747,7 +747,7 @@ def train_model(
                     )
                 )
 
-            # 保存 best
+            # Save best
             if monitor_value < best_val - 1e-6:
                 best_val = monitor_value
                 best_state = {k: v.detach().cpu() for k, v in model.state_dict().items()}

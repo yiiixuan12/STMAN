@@ -1,15 +1,15 @@
 #metric.py
 # ----------------------------
-# 损失函数 (Huber + 注意力熵稀疏 + 方差下界 + 可选对称正则)
+# Loss function (Huber + attention entropy sparsity + variance lower bound + optional symmetry regularization)
 # ----------------------------
-import torch  # <- 补上这一行
+import torch  # <- Add this import
 import torch.nn as nn
 import math
 from typing import Optional, Dict, Tuple
 
 class STFractalLoss(nn.Module):
     """
-    多任务损失函数：
+    Multi-task loss function:
       L_total = α * Huber + β * (entropy(S_s2t)+entropy(S_t2s)) + φ * VarLowerBound + η * ||B_st - B_ts||_F^2
     """
     def __init__(
@@ -19,9 +19,9 @@ class STFractalLoss(nn.Module):
         beta: float = 0.1,    # sparse
         phi: float = 0.1,     # var
         gamma: float = 0.1,   # var lower bound
-        eta_sym: float = 0.0, # 对称性软正则权重（B_st ~ B_ts）
-        diversity_weight: float = 0.0,     # 时间多样性损失权重 (防坍缩)
-        diversity_threshold: float = 0.3,  # pred_std/true_std 最低比例
+        eta_sym: float = 0.0, # Soft symmetry regularization weight (B_st ~ B_ts)
+        diversity_weight: float = 0.0,     # Temporal diversity loss weight (anti-collapse)
+        diversity_threshold: float = 0.3,  # Minimum pred_std/true_std ratio
         vmg_weight: float = 0.0,           # variance matching gradient weight (smooth anti-collapse)
         qml_weight: float = 0.0,           # quantile matching loss weight (IQR + tail matching)
         horizon_weight_mode: str = "uniform",  # uniform | linear | exp | final

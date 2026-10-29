@@ -46,8 +46,6 @@ wandb/
 !Datasets/**/*.csv
 !Datasets/**/*.pkl
 !Datasets/**/*.txt
-!FractalFeatures/
-!FractalFeatures/*.npy
 !scripts/run_stman_all.sh
 !baselines/run_baseline.sh
 

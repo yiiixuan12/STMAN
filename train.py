@@ -17,8 +17,8 @@ from metric import STFractalLoss
 # Multi-GPU wrapper
 # ----------------------------
 class _MultiGPUWrapper(nn.Module):
-    """将图数据 (A, SF, TF) 存为 buffer，使 DataParallel 自动复制到每张卡。
-    forward 只接收可按 batch 拆分的 x 和 y_in。"""
+    """Register graph data (A, SF, TF) as buffers so DataParallel replicates them to each GPU.
+    forward accepts only x and y_in, which can be split along the batch dimension."""
     def __init__(self, model: nn.Module, A: torch.Tensor, SF: torch.Tensor, TF: torch.Tensor):
         super().__init__()
         self.inner = model
@@ -31,12 +31,12 @@ class _MultiGPUWrapper(nn.Module):
 
 
 def _is_multigpu(model: nn.Module) -> bool:
-    """检查模型是否被 DataParallel 包裹。"""
+    """Check whether the model is wrapped in DataParallel."""
     return isinstance(model, nn.DataParallel)
 
 
 def _get_inner_model(model: nn.Module) -> nn.Module:
-    """获取内部原始模型（穿透 DataParallel + Wrapper）。"""
+    """Retrieve the underlying model through DataParallel and Wrapper."""
     if isinstance(model, nn.DataParallel):
         model = model.module
     if isinstance(model, _MultiGPUWrapper):
@@ -121,10 +121,10 @@ def _print_model_profile(model: nn.Module, **cfg):
 def inverse_transform_batch(arr: torch.Tensor, scaler=None, channel_idx: int = None) -> np.ndarray:
     """
     arr: [B, T, N, F] torch.Tensor
-    scaler: utils.StandardScaler / MinMaxScaler，或 None
+    scaler: utils.StandardScaler / MinMaxScaler, or None
     channel_idx: if not None, only inverse-transform using that channel's stats
                  (for when arr has fewer channels than scaler was fitted on)
-    return: numpy ndarray (同形状)
+    return: numpy ndarray (same shape)
     """
     arr_np = arr.detach().float().cpu().numpy()  # float() handles bf16→float32 conversion
     if scaler is None:
@@ -445,15 +445,15 @@ def resolve_resume_monitor_state(best_val_loaded: float,
 # ----------------------------
 def calc_metrics(y_true: torch.Tensor, y_pred: torch.Tensor, scaler=None, eps: float = 1e-6, mask_value: float = 0.0, channel_idx: int = None) -> Dict[str, float]:
     """
-    计算 MAE / RMSE / MAPE（可选反标准化，排除零值/缺失值）
-    mask_value: 真实值等于此值的点被排除（标准交通预测做法，排除传感器故障点）
+    Compute MAE / RMSE / MAPE (optionally inverse-transform; exclude zeros/missing values)
+    mask_value: exclude points whose true values equal this value (standard traffic forecasting practice for sensor failures)
     channel_idx: if not None, inverse-transform using that channel's scaler stats
     """
     yt = inverse_transform_batch(y_true, scaler, channel_idx=channel_idx)
     yp = inverse_transform_batch(y_pred, scaler, channel_idx=channel_idx)
 
-    # 零值掩码：排除传感器故障导致的零/极小速度记录
-    # 使用阈值 1e-4 (inverse后的原始空间) 排除真零值
+    # Zero mask: exclude zero/near-zero speed readings caused by sensor failures
+    # Use a 1e-4 threshold on the original scale after inverse transformation to exclude true zeros
     mask = np.abs(yt) > 1e-4
     if mask.sum() == 0:
         return {"mae": 0.0, "rmse": 0.0, "mape": 0.0}
@@ -462,7 +462,7 @@ def calc_metrics(y_true: torch.Tensor, y_pred: torch.Tensor, scaler=None, eps: f
     mae = float(np.mean(np.abs(diff[mask])))
     rmse = float(np.sqrt(np.mean(diff[mask] ** 2)))
 
-    # 标准 MAPE：分母使用较大阈值避免极小值放大误差
+    # Standard MAPE: use a larger denominator threshold to prevent tiny values from amplifying errors
     mape = float(np.mean(np.abs(diff[mask]) / np.maximum(np.abs(yt[mask]), 1.0)))
     return {"mae": mae, "rmse": rmse, "mape": mape}
 
@@ -474,7 +474,7 @@ def calc_quality_metrics(
     scaler=None,
     channel_idx: int = None,
 ) -> Dict[str, float]:
-    """在原始尺度上计算真实性指标，避免 MAE 低但预测坍缩。"""
+    """Compute realism metrics on the original scale to detect collapsed predictions despite low MAE."""
     yt = inverse_transform_batch(y_true, scaler, channel_idx=channel_idx)
     yp = inverse_transform_batch(y_pred, scaler, channel_idx=channel_idx)
     xl = inverse_transform_batch(x_last, scaler, channel_idx=channel_idx)
@@ -518,17 +518,17 @@ def calc_quality_metrics(
 # ----------------------------
 def _resolve_amp(device: torch.device, use_amp: bool, amp_policy: str):
     """
-    返回 (amp_enabled, amp_dtype, scaler)
+    Return (amp_enabled, amp_dtype, scaler)
     amp_policy: 'auto' | 'bf16' | 'fp16' | 'off'
     """
     if device.type != "cuda" or not use_amp or amp_policy == "off":
         return False, torch.float32, None
 
     if amp_policy == "bf16" or (amp_policy == "auto" and torch.cuda.is_bf16_supported()):
-        # BF16：不需要 GradScaler
+        # BF16: GradScaler is not required
         return True, torch.bfloat16, torch.cuda.amp.GradScaler(enabled=False)
     else:
-        # FP16：需要 GradScaler
+        # FP16: GradScaler is required
         return True, torch.float16, torch.cuda.amp.GradScaler(enabled=True)
 
 
@@ -544,7 +544,7 @@ def train_one_epoch(
     A: torch.Tensor,
     SF: torch.Tensor,
     TF: torch.Tensor,
-    scaler_obj=None,             # 用于反标准化显示指标
+    scaler_obj=None,             # Used to inverse-transform displayed metrics
     grad_clip: Optional[float] = 1.0,
     teacher_forcing: bool = False,
     amp_enabled: bool = False,
@@ -560,7 +560,7 @@ def train_one_epoch(
 
     multigpu = _is_multigpu(model)
 
-    # 常量放 device（避免每 batch 复制）；多卡模式下 A/SF/TF 已在 wrapper buffer 中
+    # Move constants to device once; in multi-GPU mode, A/SF/TF are already wrapper buffers
     if not multigpu:
         A = A.to(device)
         SF = SF.to(device)
@@ -590,7 +590,7 @@ def train_one_epoch(
         if scaler is not None and scaler.is_enabled():
             scaler.scale(scaled_loss).backward()
             if should_step:
-                # 先unscale再clip，防止缩放影响裁剪
+                # Unscale before clipping to prevent scaling from affecting clipping
                 scaler.unscale_(optimizer)
                 if grad_clip is not None:
                     nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
@@ -715,7 +715,7 @@ def train_model(
     ff_multiplier: int = 4,
     num_encoder_layers: int = 3,
     num_decoder_layers: int = 2,
-    epochs: int = 50,                 # 训练“接下来”的轮数（若续训，就在start_epoch基础上再跑这么多）
+    epochs: int = 50,                 # Number of additional training epochs (run this many after start_epoch when resuming)
     lr: float = 1e-3,
     weight_decay: float = 1e-5,
     patience: int = 10,
@@ -723,61 +723,61 @@ def train_model(
     device: Optional[torch.device] = None,
     teacher_forcing: bool = False,
     best_ckpt_path: Optional[str] = None,
-    last_ckpt_path: Optional[str] = None,   # 每轮覆盖保存
-    # 断点续训 / 微调
-    resume_ckpt: Optional[str] = None,      # 传已有 .pth 路径即可加载并继续
-    resume_states: bool = False,            # True=同时恢复 optimizer/scheduler
-    finetune_lr: Optional[float] = None,    # 微调时可重设新的较小 LR
-    resume_best_mae: Optional[float] = None,# 恢复 best-ckpt 时显式播种历史最优 MAE
+    last_ckpt_path: Optional[str] = None,   # Overwrite on every epoch
+    # Resume training / fine-tune
+    resume_ckpt: Optional[str] = None,      # Load and resume from an existing .pth path
+    resume_states: bool = False,            # True=also restore optimizer/scheduler
+    finetune_lr: Optional[float] = None,    # Optionally set a smaller LR for fine-tuning
+    resume_best_mae: Optional[float] = None,# Explicitly seed the historical best MAE when loading best-ckpt
     # AMP / TF32
     use_amp: bool = True,
     amp_policy: str = "auto",               # 'auto' | 'bf16' | 'fp16' | 'off'
-    allow_tf32: bool = True,                # 对 A100/30xx 打开 TF32 提速（不影响数值稳定）
-    # 进度文件（独立于主 stdout log，便于监控脚本读取）
-    progress_log: Optional[str] = None,     # 写入路径，None=不写
-    log_interval: int = 5,                  # 每隔多少 epoch 写一行（best 改善时额外写）
-    use_direct_pred: bool = False,          # True=直接预测头; False=自回归解码器
-    # 空间混合模式
+    allow_tf32: bool = True,                # Enable TF32 on A100/30xx for speed without affecting numerical stability
+    # Progress file (separate from the main stdout log for monitoring scripts)
+    progress_log: Optional[str] = None,     # Output path; None=disabled
+    log_interval: int = 5,                  # Write every this many epochs (also write when best improves)
+    use_direct_pred: bool = False,          # True=direct prediction head; False=autoregressive decoder
+    # Spatial mixing mode
     spatial_mode: str = "attention",        # "attention" | "gcn" | "hybrid"
-    k_hop: int = 8,                         # GCN/hybrid模式下的多跳邻接数
-    # LR scheduler 选择
+    k_hop: int = 8,                         # Number of adjacency hops in GCN/hybrid mode
+    # LR scheduler selection
     scheduler_type: str = "cosine",         # "cosine" | "plateau"
     plateau_patience: int = 8,              # ReduceLROnPlateau patience
-    eta_min: float = 1e-5,                  # cosine scheduler 最小学习率
-    cosine_T0: int = 30,                    # CosineAnnealingWarmRestarts 首周期长度
-    cosine_T_mult: int = 2,                 # 周期倍增因子: 1=固定周期, 2=递增(30→60→120)
-    # 防坍缩
-    diversity_weight: float = 0.0,          # 时间多样性损失权重 (>0 启用防坍缩)
-    diversity_threshold: float = 0.3,       # pred_std/true_std 最低比例
-    vmg_weight: float = 0.0,                # variance matching gradient (>0 启用，推荐 0.3)
-    qml_weight: float = 0.0,                # quantile matching loss (IQR+tail, >0 启用，推荐 0.3)
+    eta_min: float = 1e-5,                  # Minimum learning rate for the cosine scheduler
+    cosine_T0: int = 30,                    # Initial cycle length for CosineAnnealingWarmRestarts
+    cosine_T_mult: int = 2,                 # Cycle multiplier: 1=fixed cycle, 2=increasing (30→60→120)
+    # Anti-collapse
+    diversity_weight: float = 0.0,          # Temporal diversity loss weight (>0 enables anti-collapse)
+    diversity_threshold: float = 0.3,       # Minimum pred_std/true_std ratio
+    vmg_weight: float = 0.0,                # variance matching gradient (>0 enables it; recommended: 0.3)
+    qml_weight: float = 0.0,                # quantile matching loss (IQR+tail; >0 enables it; recommended: 0.3)
     horizon_weight_mode: str = "uniform",   # uniform | linear | exp | final
     horizon_last_weight: float = 1.0,       # last horizon loss weight before mean normalization
     delta_weight: float = 0.0,              # trend/delta matching loss weight
-    residual_delta: bool = True,            # False=不用残差修正, 强制模型预测绝对值(防半稳态数据坍缩)
+    residual_delta: bool = True,            # False=disable residual correction and force absolute-value predictions (prevent collapse on semi-steady data)
     monitor_mode: str = "mae",              # "mae" | "strict"
-    strict_diversity_gate: float = 0.5,     # strict monitor 的 diversity 门槛
-    strict_vs_persistence_gate: float = 0.95,  # strict monitor 的 vs_persistence 门槛
+    strict_diversity_gate: float = 0.5,     # Diversity threshold for the strict monitor
+    strict_vs_persistence_gate: float = 0.95,  # vs_persistence threshold for the strict monitor
     direct_head_mode: str = "legacy",       # "legacy" | "chunkwise" | "attn" | "linear"
-    direct_step_refine: bool = False,       # 直接预测头的 chunk 内逐步残差细化
-    decoder_future_tod: bool = True,        # 自回归解码时是否注入未来TOD；旧ckpt默认关闭
+    direct_step_refine: bool = False,       # Per-step residual refinement within chunks in the direct prediction head
+    decoder_future_tod: bool = True,        # Inject future TOD during autoregressive decoding; disabled by default for older checkpoints
     gated_residual: bool = False,           # learn horizon/node residual gate instead of always adding last value
-    ema_decay: float = 0.0,                 # >0 时启用参数EMA，用于收尾
-    ema_start_epoch: int = 0,               # 从哪个epoch开始更新EMA
-    ema_eval_interval: int = 1,             # 每隔多少epoch评估一次EMA
-    grad_accum_steps: int = 1,              # batch 小时做梯度累积，提升有效 batch
-    head_warmup_epochs: int = 0,            # warm-start 新预测头时先只训练 head
-    head_lr_mult: float = 1.0,              # head 参数组学习率倍率
+    ema_decay: float = 0.0,                 # >0 enables parameter EMA for final training stages
+    ema_start_epoch: int = 0,               # Epoch at which EMA updates begin
+    ema_eval_interval: int = 1,             # Evaluate EMA every this many epochs
+    grad_accum_steps: int = 1,              # Accumulate gradients for small batches to increase effective batch size
+    head_warmup_epochs: int = 0,            # Initially train only the head when warm-starting a new prediction head
+    head_lr_mult: float = 1.0,              # Learning rate multiplier for the head parameter group
     roi_stop_epochs: int = 0,               # stop if recent MAE drop is too small
     roi_min_mae_drop: float = 0.0,          # minimum recent MAE drop over roi_stop_epochs
-    allow_resume_mismatch: bool = False,    # True=允许大幅non-strict warm-start
-    # 多卡并行
-    gpu_ids: Optional[list] = None,         # e.g. [0,1] 表示用两张卡DataParallel
-    scaler_type: Optional[str] = None,      # 保存到 checkpoint，供严格评估重建
+    allow_resume_mismatch: bool = False,    # True=allow substantial mismatches in non-strict warm starts
+    # Multi-GPU parallelism
+    gpu_ids: Optional[list] = None,         # e.g. [0,1] uses DataParallel on two GPUs
+    scaler_type: Optional[str] = None,      # Save in the checkpoint for reconstruction during strict evaluation
     scale_target_only: bool = False,        # calendar channels stay raw while target channel is scaled
     calendar_features: str = "tod",         # saved reproducibility metadata: tod or tod+dow
-    split_rate: Optional[float] = None,     # 保存训练协议，供复现和评估使用
-    val_ratio: Optional[float] = None,      # 保存训练协议，供复现和评估使用
+    split_rate: Optional[float] = None,     # Save the training protocol for reproducibility and evaluation
+    val_ratio: Optional[float] = None,      # Save the training protocol for reproducibility and evaluation
 ):
     device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if out_dim is None:
@@ -795,7 +795,7 @@ def train_model(
         else out_dim
     )
 
-    # TF32 设置（只影响 matmul/conv 的内部精度，通常有益）
+    # TF32 settings (affect only internal matmul/conv precision; usually beneficial)
     if device.type == "cuda":
         torch.backends.cuda.matmul.allow_tf32 = bool(allow_tf32)
         torch.backends.cudnn.allow_tf32 = bool(allow_tf32)
@@ -818,7 +818,7 @@ def train_model(
         time_feature_start=time_feature_start,
     ).to(device)
 
-    # torch.compile 已禁用（Transformer decoder的causal mask导致graph break，反而变慢）
+    # torch.compile is disabled (the Transformer decoder causal mask causes graph breaks and slows execution)
 
     _print_model_profile(
         model,
@@ -836,7 +836,7 @@ def train_model(
         model = nn.DataParallel(wrapper, device_ids=gpu_ids, output_device=gpu_ids[0])
         print(f"[MultiGPU] DataParallel on GPUs {gpu_ids}")
 
-    # 全程使用小正则化权重（不使用warmup，避免训练中途突然激活导致性能退化）
+    # Use small regularization weights throughout (no warmup, avoiding degradation from sudden activation during training)
     criterion = STFractalLoss(
         huber_delta=1.0, alpha=1.0, beta=0.01, phi=0.01, gamma=0.1, eta_sym=0.0,
         diversity_weight=diversity_weight, diversity_threshold=diversity_threshold,
@@ -845,7 +845,7 @@ def train_model(
         horizon_last_weight=horizon_last_weight,
         delta_weight=delta_weight,
     ).to(device)
-    warmup_at_epoch = 99999  # 实际禁用warmup
+    warmup_at_epoch = 99999  # Effectively disable warmup
 
     head_warmup_epochs = max(int(head_warmup_epochs), 0)
     grad_accum_steps = max(int(grad_accum_steps), 1)
@@ -860,7 +860,7 @@ def train_model(
     if grad_accum_steps > 1:
         print(f"[GradAccum] steps={grad_accum_steps} effective_batch≈{grad_accum_steps}x loader_batch")
 
-    # optimizer 需在 DataParallel 包装后创建，确保参数引用正确
+    # Create the optimizer after DataParallel wrapping to ensure correct parameter references
     optimizer = _make_optimizer(model, lr=lr, weight_decay=weight_decay, head_lr_mult=head_lr_mult)
     if scheduler_type == "cosine":
         scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
@@ -933,7 +933,7 @@ def train_model(
             start_epoch = 1
             best_val_loaded = float("inf")
             _cfg = {}
-        # 微调：不恢复优化器/调度器，且可重设更小的学习率
+        # Fine-tuning: do not restore optimizer/scheduler; optionally set a smaller learning rate
         if resumed_successfully and (not resume_states) and (finetune_lr is not None):
             for g in optimizer.param_groups:
                 g["lr"] = finetune_lr * (head_lr_mult if g.get("name") == "head" else 1.0)
@@ -963,7 +963,7 @@ def train_model(
     else:
         print("[Resume] No checkpoint. Train from scratch.")
 
-    # 训练循环：从 start_epoch 开始，再训练 epochs 轮
+    # Training loop: run epochs additional epochs starting from start_epoch
     best_state = None
     wait = 0
     end_epoch = start_epoch + epochs - 1
@@ -991,7 +991,7 @@ def train_model(
             _set_head_bootstrap_trainable(model, enabled=False)
             print(f"[HeadBootstrap] epoch={epoch}: unfreeze backbone")
 
-        # 到达/超过 warmup 点后一次性打开正则（若尚未打开）
+        # Enable regularization once at or after the warmup point if not already enabled
         if epoch >= warmup_at_epoch and (criterion.beta == 0.0 or criterion.phi == 0.0):
             criterion.beta = 0.1
             criterion.phi = 0.1
@@ -1063,7 +1063,7 @@ def train_model(
                   f"RMSE={ema_va['rmse']:.4f} Div={ema_va['diversity']:.2f} "
                   f"vsP={ema_va['vs_persistence']:.2f} source={effective_source}")
 
-        # 写入独立进度文件（每 log_interval epoch 或 MAE 改善时）
+        # Write the separate progress file every log_interval epochs or when MAE improves
         mae_improved = effective_va['mae'] < best_mae
         if mae_improved:
             best_mae = effective_va['mae']
@@ -1079,7 +1079,7 @@ def train_model(
                     + "\n"
                 )
 
-        # 保存 last（每轮覆盖）— 统一用内部模型的 state_dict
+        # Save last (overwrite each epoch) using the underlying model state_dict consistently
         _ckpt_cfg = _pack_config(
             n_nodes=n_nodes, in_dim=in_dim, d_model=d_model, n_heads=n_heads,
             seq_len=seq_len, pred_len=pred_len, sf_dim=sf_dim, tf_dim=tf_dim,
@@ -1117,7 +1117,7 @@ def train_model(
                 config=_ckpt_cfg,
             )
 
-        # 保存 best
+        # Save best
         if effective_monitor_value < best_val - 1e-6:
             best_val = effective_monitor_value
             if effective_source == "ema" and ema_helper is not None:

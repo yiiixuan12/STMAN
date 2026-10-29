@@ -1,28 +1,28 @@
-# STGCN实现
+# STGCN implementation
 # -*- coding: utf-8 -*-
 """
-输入张量形状: [B, C_in, T, N]
+Input tensor shape: [B, C_in, T, N]
 
-需要的 args 字段：
-- n_his: 历史时间步数 (int)
-- Kt: 时域卷积核长 (int)
-- Ks: 图卷积阶数(cheb)或占位(graph) (int)
+Required args fields:
+- n_his: Number of historical time steps (int)
+- Kt: Temporal convolution kernel length (int)
+- Ks: Graph convolution order (cheb) or placeholder (graph) (int)
 - act_func: 'glu' | 'gtu' | 'relu' | 'silu'
 - graph_conv_type: 'cheb_graph_conv' | 'graph_conv'
-- gso: 图移位算子 (torch.FloatTensor[N, N])；Cheb 版需已缩放到[-1,1]
-- enable_bias: 线性层/图卷积是否带偏置 (bool)
-- droprate: Dropout 概率 (float)
+- gso: Graph shift operator (torch.FloatTensor[N, N]); scale to [-1,1] for Cheb
+- enable_bias: Whether linear layers/graph convolutions use bias (bool)
+- droprate: Dropout probability (float)
 
-blocks 说明（与常见 STGCN 配置兼容）：
-例如 blocks = [
-    [C_in],                 # 输入通道占位（只用到最后一个数）
+blocks layout (compatible with common STGCN configurations):
+Example: blocks = [
+    [C_in],                 # Input channel placeholder (only the last value is used)
     [64, 16, 64],           # ST-Block1: (T:64 -> G:16 -> T:64)
     [64, 16, 64],           # ST-Block2
-    [64],                   # OutputBlock 输入通道（上一层输出通道）
-    [128],                  # OutputBlock 中间全连接通道
-    [C_out]                 # 输出通道
+    [64],                   # OutputBlock input channels (output channels of the previous layer)
+    [128],                  # OutputBlock intermediate fully connected channels
+    [C_out]                 # Output channels
 ]
-其中 ST-Blocks 的数量 = len(blocks) - 3
+Number of ST-Blocks = len(blocks) - 3
 """
 
 import math
@@ -33,10 +33,10 @@ import torch.nn.init as init
 
 
 # -----------------------------
-# 基础组件
+# Basic components
 # -----------------------------
 class Align(nn.Module):
-    """通过 1x1 卷积或零填充把通道对齐到指定维度"""
+    """Align channels to the target dimension with a 1x1 convolution or zero padding"""
     def __init__(self, c_in: int, c_out: int):
         super().__init__()
         self.c_in = c_in
@@ -54,7 +54,7 @@ class Align(nn.Module):
 
 
 class CausalConv1d(nn.Conv1d):
-    """一维因果卷积（可选左填充）"""
+    """1D causal convolution (optional left padding)"""
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  enable_padding=False, dilation=1, groups=1, bias=True):
         self._padding = (kernel_size - 1) * dilation if enable_padding else 0
@@ -68,7 +68,7 @@ class CausalConv1d(nn.Conv1d):
 
 
 class CausalConv2d(nn.Conv2d):
-    """二维因果卷积：仅在时间维(T)做左填充，节点维(N)不填充"""
+    """2D causal convolution: left-pad time (T) only, without padding nodes (N)"""
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  enable_padding=False, dilation=1, groups=1, bias=True):
         k = nn.modules.utils._pair(kernel_size)
@@ -91,9 +91,9 @@ class CausalConv2d(nn.Conv2d):
 
 class TemporalConvLayer(nn.Module):
     """
-    带门控的时域卷积（GLU/GTU），保持因果性。
-    输入:  [B, C_in, T, N]
-    输出:  [B, C_out, T - (Kt-1), N] （未启用padding时）
+    Gated temporal convolution (GLU/GTU) that preserves causality.
+    Input:  [B, C_in, T, N]
+    Output:  [B, C_out, T - (Kt-1), N] (when padding is disabled)
     """
     def __init__(self, Kt: int, c_in: int, c_out: int, n_vertex: int, act_func: str):
         super().__init__()
@@ -108,7 +108,7 @@ class TemporalConvLayer(nn.Module):
         else:
             out_c = c_out
 
-        # 因果卷积：默认不做padding，时间长度将缩短 Kt-1
+        # Causal convolution: no padding by default; time length shrinks by Kt-1
         self.causal_conv = CausalConv2d(
             in_channels=c_in, out_channels=out_c,
             kernel_size=(Kt, 1), enable_padding=False, dilation=1
@@ -118,7 +118,7 @@ class TemporalConvLayer(nn.Module):
         self.act_func = act_func
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # 对齐残差分支，并裁剪时间步与主分支对齐
+        # Align residual channels and crop time steps to match the main branch
         x_in = self.align(x)[:, :, self.Kt - 1:, :]
         x_causal = self.causal_conv(x)
 
@@ -138,14 +138,14 @@ class TemporalConvLayer(nn.Module):
 
 
 # -----------------------------
-# 图卷积（Cheb / GCN）
+# Graph convolution (Cheb / GCN)
 # -----------------------------
 class ChebGraphConv(nn.Module):
     """
-    Chebyshev 多项式图卷积
-    输入:  x [B, C_in, T, N]
-    输出:      [B, T, N, C_out]
-    要求：gso 已缩放至 [-1, 1]
+    Chebyshev polynomial graph convolution
+    Input:  x [B, C_in, T, N]
+    Output:      [B, T, N, C_out]
+    Requires gso scaled to [-1, 1]
     """
     def __init__(self, c_in: int, c_out: int, Ks: int, gso: torch.Tensor, bias: bool):
         super().__init__()
@@ -176,7 +176,7 @@ class ChebGraphConv(nn.Module):
         # T_0(x) = x
         x_list = [x]
         if self.Ks >= 2:
-            # T_1(x) = gso @ x  （在节点维做乘法）
+            # T_1(x) = gso @ x  (multiply along the node dimension)
             x1 = torch.einsum('nm,btnc->btmc', self.gso, x)
             x_list.append(x1)
         for k in range(2, self.Ks):
@@ -185,7 +185,7 @@ class ChebGraphConv(nn.Module):
 
         # [B,T,K,N,C_in]
         xk = torch.stack(x_list, dim=2)
-        # 线性组合： [B,T,K,N,C_in] × [K,C_in,C_out] -> [B,T,N,C_out]
+        # Linear combination: [B,T,K,N,C_in] × [K,C_in,C_out] -> [B,T,N,C_out]
         y = torch.einsum('btknc,kcd->btnd', xk, self.weight)
         if self.bias is not None:
             y = y + self.bias
@@ -194,9 +194,9 @@ class ChebGraphConv(nn.Module):
 
 class GraphConv(nn.Module):
     """
-    GCN 风格的一阶图卷积（采用重归一化技巧），本实现假设 gso 已含该处理
-    输入:  x [B, C_in, T, N]
-    输出:      [B, T, N, C_out]
+    GCN-style first-order graph convolution; assumes gso already applies the renormalization trick
+    Input:  x [B, C_in, T, N]
+    Output:      [B, T, N, C_out]
     """
     def __init__(self, c_in: int, c_out: int, gso: torch.Tensor, bias: bool):
         super().__init__()
@@ -215,7 +215,7 @@ class GraphConv(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # [B, C, T, N] -> [B, T, N, C]
         x = x.permute(0, 2, 3, 1)                      # [B,T,N,C_in]
-        x = torch.einsum('nm,btnc->btmc', self.gso, x) # 邻接聚合 [B,T,N,C_in]
+        x = torch.einsum('nm,btnc->btmc', self.gso, x) # Adjacency aggregation [B,T,N,C_in]
         y = torch.einsum('btnc,cd->btnd', x, self.weight)
         if self.bias is not None:
             y = y + self.bias
@@ -223,7 +223,7 @@ class GraphConv(nn.Module):
 
 
 class GraphConvLayer(nn.Module):
-    """对齐通道后施加图卷积，并做残差（与对齐前后的通道一致）"""
+    """Align channels, apply graph convolution, and add a residual with matching aligned channels"""
     def __init__(self, graph_conv_type: str, c_in: int, c_out: int, Ks: int, gso: torch.Tensor, bias: bool):
         super().__init__()
         self.graph_conv_type = graph_conv_type
@@ -243,11 +243,11 @@ class GraphConvLayer(nn.Module):
 
 
 # -----------------------------
-# ST-Block 与 输出块
+# ST-Block and output block
 # -----------------------------
 class STConvBlock(nn.Module):
     """
-    结构: T (GLU/GTU) -> G (Cheb/GCN) -> T -> LayerNorm -> Dropout
+    Structure: T (GLU/GTU) -> G (Cheb/GCN) -> T -> LayerNorm -> Dropout
     """
     def __init__(self, Kt, Ks, n_vertex, last_block_channel, channels,
                  act_func, graph_conv_type, gso, bias, droprate):
@@ -271,7 +271,7 @@ class STConvBlock(nn.Module):
 
 
 class OutputBlock(nn.Module):
-    """结构: T -> LayerNorm -> FC -> ReLU -> Dropout -> FC"""
+    """Structure: T -> LayerNorm -> FC -> ReLU -> Dropout -> FC"""
     def __init__(self, Ko, last_block_channel, channels, end_channel,
                  n_vertex, act_func, bias, droprate):
         super().__init__()
@@ -294,10 +294,10 @@ class OutputBlock(nn.Module):
 
 
 # -----------------------------
-# 顶层模型（Cheb / GCN 两版）
+# Top-level models (Cheb / GCN variants)
 # -----------------------------
 class STGCNChebGraphConv(nn.Module):
-    """包含结构:  (T-G-T-N-D) × L  +  (T-N-F-F)"""
+    """Architecture:  (T-G-T-N-D) × L  +  (T-N-F-F)"""
     def __init__(self, args, blocks, n_vertex):
         super().__init__()
         modules = []
@@ -311,7 +311,7 @@ class STGCNChebGraphConv(nn.Module):
             )
         self.st_blocks = nn.Sequential(*modules)
 
-        # 计算 OutputBlock 的时域核长 Ko（未做 padding 情况下）
+        # Compute OutputBlock temporal kernel length Ko (without padding)
         self.Ko = args.n_his - (len(blocks) - 3) * 2 * (args.Kt - 1)
         if self.Ko >= 1:
             self.output = OutputBlock(self.Ko, blocks[-3][-1], blocks[-2], blocks[-1][0],
@@ -335,7 +335,7 @@ class STGCNChebGraphConv(nn.Module):
 
 
 class STGCNGraphConv(nn.Module):
-    """包含结构:  (T-G-T-N-D) × L  +  (T-N-F-F)（图卷积为 GCN 版）"""
+    """Architecture:  (T-G-T-N-D) × L  +  (T-N-F-F)(GCN graph convolution variant)"""
     def __init__(self, args, blocks, n_vertex):
         super().__init__()
         modules = []

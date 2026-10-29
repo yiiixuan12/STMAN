@@ -5,7 +5,7 @@ import torch.nn as nn
 
 class HuberRegLoss(nn.Module):
     """
-    仅预测任务的 Huber 损失:
+    Huber loss for the prediction task:
       loss = { 0.5*(y-y_hat)^2, |y-y_hat| <= delta
              { delta*|y-y_hat| - 0.5*delta^2, otherwise
     """
